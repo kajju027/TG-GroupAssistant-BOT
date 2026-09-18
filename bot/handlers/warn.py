@@ -92,6 +92,11 @@ async def cmd_unwarn(message: Message, is_admin: bool = False):
 async def cmd_warns(message: Message):
     uid, name, mention = await get_user_from_message(message)
     if not uid:
+        if message.from_user is None:
+            # Anonymous admin ran /warns with no reply/mention - there's no
+            # user to check warnings for.
+            await message.answer("❌ Reply to a user or mention them.")
+            return
         uid = message.from_user.id
         mention = message.from_user.mention_html()
         name = message.from_user.full_name
