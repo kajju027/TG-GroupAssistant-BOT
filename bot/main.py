@@ -20,7 +20,9 @@ from bot.core.logger import get_logger, quiet_third_party_loggers
 from bot.database import init_db
 from bot.handlers import start, settings, antilink, antiword, antispam, antifake
 from bot.handlers import welcome, warn, mute, tag, filters as filter_handler
+from bot.handlers import reactions
 from bot.middlewares.admin_check import AdminCheckMiddleware
+from bot.utils.style import patch_outgoing_messages
 
 log = get_logger("BOT")
 
@@ -43,6 +45,17 @@ def _build_dispatcher() -> Dispatcher:
     dp.include_router(welcome.router)
     dp.include_router(antifake.router)
 
+    # reactions.router's /reaction command matches Command(...) so it's
+    # safe anywhere, but its OTHER handlers (on_new_group_message /
+    # on_new_channel_post) are catch-alls that always raise SkipHandler
+    # after scheduling the delayed reaction. That means: whichever of
+    # these catch-all-style routers runs FIRST gets to act, then yields
+    # to the next one in this list for the SAME update - so reactions
+    # must be registered before antilink/antiword/antispam/filters, or
+    # its catch-all would never run at all (those don't yield; once one
+    # of them matches and completes, it claims the update for good).
+    dp.include_router(reactions.router)
+
     # Command sub-handlers inside these routers are registered above
     # their catch-all counterparts *inside the same router* (see
     # handlers/antilink.py, antiword.py, antispam.py, filters.py), and
@@ -59,6 +72,7 @@ def _build_dispatcher() -> Dispatcher:
 async def run():
     quiet_third_party_loggers()
     validate()
+    patch_outgoing_messages()
 
     log.section("DATABASE")
     await init_db()
@@ -78,7 +92,8 @@ async def run():
 
     log.success("All feature modules loaded:")
     for name in ["start", "settings", "warn", "mute", "tag", "welcome",
-                 "antifake", "antilink", "antiword", "antispam", "filters"]:
+                 "antifake", "antilink", "antiword", "antispam", "filters",
+                 "reactions"]:
         log.info(f"   • {name}")
 
     log.section("POLLING")
