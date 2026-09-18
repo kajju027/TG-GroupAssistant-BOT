@@ -1,6 +1,22 @@
 import aiosqlite
 from bot.core.config import DB_PATH
 
+# Columns that may be missing on a database created by an older version
+# of this bot (SQLite's CREATE TABLE IF NOT EXISTS does not add new
+# columns to an existing table, so upgrades need a small migration).
+_MIGRATION_COLUMNS = [
+    ("group_settings", "reaction_enabled", "INTEGER DEFAULT 0"),
+    ("group_settings", "reaction_emoji", "TEXT DEFAULT '👍'"),
+]
+
+async def _run_migrations(db: aiosqlite.Connection):
+    for table, column, coltype in _MIGRATION_COLUMNS:
+        async with db.execute(f"PRAGMA table_info({table})") as cur:
+            existing = {row[1] async for row in cur}
+        if column not in existing:
+            await db.execute(f"ALTER TABLE {table} ADD COLUMN {column} {coltype}")
+    await db.commit()
+
 async def init_db():
     async with aiosqlite.connect(DB_PATH) as db:
         await db.executescript("""
@@ -21,7 +37,9 @@ async def init_db():
                 warn_limit INTEGER DEFAULT 3,
                 warn_action TEXT DEFAULT 'kick',
                 mute_on_join INTEGER DEFAULT 0,
-                antiword_action TEXT DEFAULT 'delete'
+                antiword_action TEXT DEFAULT 'delete',
+                reaction_enabled INTEGER DEFAULT 0,
+                reaction_emoji TEXT DEFAULT '👍'
             );
             CREATE TABLE IF NOT EXISTS banned_words (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -70,6 +88,7 @@ async def init_db():
             );
         """)
         await db.commit()
+        await _run_migrations(db)
 
 async def get_settings(chat_id: int) -> dict:
     async with aiosqlite.connect(DB_PATH) as db:
