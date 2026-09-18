@@ -5,7 +5,7 @@ from bot.database import (
     get_settings, update_setting,
     get_spam_count, increment_spam, reset_spam
 )
-from bot.utils.helpers import is_admin
+from bot.utils.helpers import is_admin as check_is_admin
 
 router = Router()
 
@@ -58,12 +58,13 @@ async def cmd_antispam(message: Message, is_admin: bool = False):
 # starting with "/" so it never swallows a command intended for other
 # routers (commands like /warn, /mute, /settings would otherwise never
 # get a chance to run, since this handler used to match ALL messages
-# with no text filter at all).
-@router.message(F.chat.type.in_({"group", "supergroup"}), ~F.text.startswith("/"))
+# with no text filter at all). Requires F.text so non-text messages
+# (photos, stickers, etc. with no caption) don't fall through here.
+@router.message(F.chat.type.in_({"group", "supergroup"}), F.text, ~F.text.startswith("/"))
 async def check_spam(message: Message):
     if not message.from_user:
         return
-    if await is_admin(message.bot, message.chat.id, message.from_user.id):
+    if await check_is_admin(message.bot, message.chat.id, message.from_user.id):
         return
     s = await get_settings(message.chat.id)
     if not s["antispam"]:
