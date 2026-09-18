@@ -2,7 +2,7 @@ from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.filters import Command, CommandStart
 from bot.database import get_settings, init_db
-from bot.utils.helpers import is_admin, settings_main_kb
+from bot.utils.helpers import is_admin, settings_main_kb, is_message_sender_admin
 
 router = Router()
 
@@ -59,7 +59,7 @@ async def start_dm(message: Message):
 
 @router.message(Command("settings"), F.chat.type.in_({"group", "supergroup"}))
 async def settings_from_group(message: Message):
-    if not await is_admin(message.bot, message.chat.id, message.from_user.id):
+    if not await is_message_sender_admin(message):
         await message.answer("❌ Admins only.")
         return
     me = await message.bot.get_me()
@@ -109,6 +109,9 @@ async def help_cmd(message: Message):
         "/pin [reply] - Pin a message\n"
         "/unpin - Unpin message\n"
         "/kick - Kick without ban\n"
+        "/reaction [on/off] - Toggle auto-reaction on new posts\n"
+        "/reaction emoji [emoji] - Change auto-reaction emoji\n"
+        "   (works in groups AND channels)\n"
     )
     await message.answer(text)
 
