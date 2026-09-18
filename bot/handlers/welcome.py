@@ -2,7 +2,6 @@ from aiogram import Router, F
 from aiogram.types import Message, ChatMemberUpdated
 from aiogram.filters import Command, ChatMemberUpdatedFilter, JOIN_TRANSITION, LEAVE_TRANSITION
 from bot.database import get_settings, update_setting
-from bot.utils.helpers import is_admin
 
 router = Router()
 
