@@ -16,6 +16,8 @@ def is_telegram_link(text: str) -> bool:
     return any(re.search(p, text, re.I) for p in patterns)
 
 async def is_admin(bot: Bot, chat_id: int, user_id: int) -> bool:
+    if user_id is None:
+        return False
     try:
         member = await bot.get_chat_member(chat_id, user_id)
         return member.status in (ChatMemberStatus.ADMINISTRATOR, ChatMemberStatus.CREATOR)
@@ -23,11 +25,28 @@ async def is_admin(bot: Bot, chat_id: int, user_id: int) -> bool:
         return False
 
 async def is_creator(bot: Bot, chat_id: int, user_id: int) -> bool:
+    if user_id is None:
+        return False
     try:
         member = await bot.get_chat_member(chat_id, user_id)
         return member.status == ChatMemberStatus.CREATOR
     except Exception:
         return False
+
+async def is_message_sender_admin(message: Message) -> bool:
+    """True if the person/entity that SENT `message` is an admin.
+
+    Handles the normal case (message.from_user is a real user) and the
+    anonymous-admin / linked-channel case (message.from_user is None and
+    message.sender_chat is set instead) without raising when neither is
+    present.
+    """
+    if message.from_user is not None:
+        return await is_admin(message.bot, message.chat.id, message.from_user.id)
+    if message.sender_chat is not None and message.sender_chat.id == message.chat.id:
+        # Only an admin can post a message "as the group" (anonymous admin).
+        return True
+    return False
 
 async def get_user_from_message(message: Message) -> tuple:
     if message.reply_to_message:
@@ -76,6 +95,7 @@ def settings_main_kb(chat_id: int) -> InlineKeyboardMarkup:
             InlineKeyboardButton(text="🔇 Mute", callback_data=f"menu:mute:{chat_id}"),
             InlineKeyboardButton(text="🔍 Filters", callback_data=f"menu:filters:{chat_id}"),
         ],
+        [InlineKeyboardButton(text="🎭 Auto-Reaction", callback_data=f"menu:reaction:{chat_id}")],
         [InlineKeyboardButton(text="❌ Close", callback_data="close")],
     ])
 
