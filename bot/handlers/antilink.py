@@ -3,7 +3,7 @@ from aiogram import Router, F
 from aiogram.types import Message
 from aiogram.filters import Command
 from bot.database import get_settings, update_setting, add_whitelist_link, remove_whitelist_link, get_whitelisted_links
-from bot.utils.helpers import is_admin, get_user_from_message
+from bot.utils.helpers import is_admin as check_is_admin, get_user_from_message
 
 router = Router()
 
@@ -97,7 +97,7 @@ async def cmd_antilink(message: Message, is_admin: bool = False):
 async def check_links(message: Message):
     if not message.from_user:
         return
-    if await is_admin(message.bot, message.chat.id, message.from_user.id):
+    if await check_is_admin(message.bot, message.chat.id, message.from_user.id):
         return
     s = await get_settings(message.chat.id)
     if not s["antilink"]:
