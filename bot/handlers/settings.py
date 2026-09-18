@@ -201,6 +201,27 @@ async def menu_mute(callback: CallbackQuery):
     )
 
 
+@router.callback_query(F.data.startswith("menu:reaction:"))
+async def menu_reaction(callback: CallbackQuery):
+    chat_id = int(callback.data.split(":")[2])
+    if not await _check_admin(callback, chat_id):
+        return
+    s = await get_settings(chat_id)
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [_toggle_btn("Auto-Reaction", bool(s["reaction_enabled"]), "reaction_enabled", chat_id)],
+        [InlineKeyboardButton(text="⬅️ Back", callback_data=f"menu:main:{chat_id}")],
+    ])
+    await callback.message.edit_text(
+        "🎭 <b>Auto-Reaction Settings</b>\n\n"
+        f"Status: {'✅ ON' if s['reaction_enabled'] else '❌ OFF'}\n"
+        f"Emoji: {s['reaction_emoji']}\n\n"
+        "<b>Commands (group or channel):</b>\n"
+        "/reaction on|off\n"
+        "/reaction emoji [emoji]",
+        reply_markup=kb,
+    )
+
+
 @router.callback_query(F.data.startswith("menu:filters:"))
 async def menu_filters(callback: CallbackQuery):
     chat_id = int(callback.data.split(":")[2])
@@ -247,6 +268,7 @@ async def toggle_setting(callback: CallbackQuery):
         "antifake":  (menu_antifake,  f"menu:antifake:{chat_id}"),
         "welcome":   (menu_welcome,   f"menu:welcome:{chat_id}"),
         "warn":      (menu_warn,      f"menu:warn:{chat_id}"),
+        "reaction_enabled": (menu_reaction, f"menu:reaction:{chat_id}"),
     }
     if _menu_feature in _menu_map:
         handler, new_data = _menu_map[_menu_feature]
