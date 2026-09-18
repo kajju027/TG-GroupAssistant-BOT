@@ -2,7 +2,7 @@ from aiogram import Router, F
 from aiogram.types import Message
 from aiogram.filters import Command
 from bot.database import get_settings, update_setting, get_banned_words, add_banned_word, remove_banned_word
-from bot.utils.helpers import is_admin
+from bot.utils.helpers import is_admin as check_is_admin
 
 router = Router()
 
@@ -62,7 +62,7 @@ async def cmd_antiword(message: Message, is_admin: bool = False):
 async def check_words(message: Message):
     if not message.from_user:
         return
-    if await is_admin(message.bot, message.chat.id, message.from_user.id):
+    if await check_is_admin(message.bot, message.chat.id, message.from_user.id):
         return
     s = await get_settings(message.chat.id)
     if not s["antiword"]:
