@@ -2,7 +2,6 @@ from aiogram import Router, F
 from aiogram.types import Message
 from aiogram.filters import Command
 from bot.database import get_filters, add_filter, remove_filter
-from bot.utils.helpers import is_admin
 
 router = Router()
 
