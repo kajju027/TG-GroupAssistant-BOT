@@ -5,8 +5,6 @@ from bot.database import (
     get_settings, update_setting,
     get_antifake_prefixes, add_antifake_prefix, remove_antifake_prefix
 )
-from bot.utils.helpers import is_admin
-
 router = Router()
 
 def _get_phone_prefix(phone: str) -> str:
