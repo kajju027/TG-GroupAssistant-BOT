@@ -16,7 +16,7 @@ async def cmd_antiword(message: Message, is_admin: bool=False):
         s = await get_settings(message.chat.id)
         status = '✅ ON' if s['antiword'] else '❌ OFF'
         words = await get_banned_words(message.chat.id)
-        await message.answer(f'🔤 <b>Anti-Word:</b> {status}\n<b>Action:</b> {s['antiword_action'].upper()}\n<b>Words:</b> {(', '.join(words) if words else 'None')}\n\n<b>Usage:</b> /antiword on|off|add|remove|list|action [word]')
+        await message.answer(f"🔤 <b>Anti-Word:</b> {status}\n<b>Action:</b> {s['antiword_action'].upper()}\n<b>Words:</b> {(', '.join(words) if words else 'None')}\n\n<b>Usage:</b> /antiword on|off|add|remove|list|action [word]")
         return
     cmd = parts[1].lower()
     if cmd == 'on':
@@ -81,7 +81,7 @@ async def check_words(message: Message):
                     except Exception:
                         pass
                 else:
-                    await answer_and_autodelete(message, f'🔤 <b>Banned word removed.</b>\n⚠️ {mention} has been warned ({count}/{s['warn_limit']})')
+                    await answer_and_autodelete(message, f"🔤 <b>Banned word removed.</b>\n⚠️ {mention} has been warned ({count}/{s['warn_limit']})")
             elif action == 'kick':
                 await answer_and_autodelete(message, f'🚪 {mention} was kicked for using a banned word.')
                 try:
