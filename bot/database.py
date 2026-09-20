@@ -1,242 +1,176 @@
-import aiosqlite
-from bot.core.config import DB_PATH
-
-# Columns that may be missing on a database created by an older version
-# of this bot (SQLite's CREATE TABLE IF NOT EXISTS does not add new
-# columns to an existing table, so upgrades need a small migration).
-_MIGRATION_COLUMNS = [
-    ("group_settings", "reaction_enabled", "INTEGER DEFAULT 0"),
-    ("group_settings", "reaction_emoji", "TEXT DEFAULT '👍'"),
-]
-
-async def _run_migrations(db: aiosqlite.Connection):
-    for table, column, coltype in _MIGRATION_COLUMNS:
-        async with db.execute(f"PRAGMA table_info({table})") as cur:
-            existing = {row[1] async for row in cur}
-        if column not in existing:
-            await db.execute(f"ALTER TABLE {table} ADD COLUMN {column} {coltype}")
-    await db.commit()
+import datetime
+from bot.storage.engine import init_storage, load_chat, save_chat, update_chat, update_index, remove_from_index, get_managed_chats_for_user, note_admin_seen
 
 async def init_db():
-    async with aiosqlite.connect(DB_PATH) as db:
-        await db.executescript("""
-            CREATE TABLE IF NOT EXISTS group_settings (
-                chat_id INTEGER PRIMARY KEY,
-                antilink INTEGER DEFAULT 0,
-                antilink_action TEXT DEFAULT 'delete',
-                antiword INTEGER DEFAULT 0,
-                antispam INTEGER DEFAULT 0,
-                antispam_limit INTEGER DEFAULT 5,
-                antispam_window INTEGER DEFAULT 10,
-                antifake INTEGER DEFAULT 0,
-                antifake_mode TEXT DEFAULT 'blacklist',
-                welcome INTEGER DEFAULT 1,
-                welcome_msg TEXT DEFAULT 'Welcome {name} to {group}!',
-                goodbye INTEGER DEFAULT 1,
-                goodbye_msg TEXT DEFAULT 'Goodbye {name}!',
-                warn_limit INTEGER DEFAULT 3,
-                warn_action TEXT DEFAULT 'kick',
-                mute_on_join INTEGER DEFAULT 0,
-                antiword_action TEXT DEFAULT 'delete',
-                reaction_enabled INTEGER DEFAULT 0,
-                reaction_emoji TEXT DEFAULT '👍'
-            );
-            CREATE TABLE IF NOT EXISTS banned_words (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                chat_id INTEGER,
-                word TEXT,
-                UNIQUE(chat_id, word)
-            );
-            CREATE TABLE IF NOT EXISTS warnings (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                chat_id INTEGER,
-                user_id INTEGER,
-                reason TEXT,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            );
-            CREATE TABLE IF NOT EXISTS spam_tracker (
-                user_id INTEGER,
-                chat_id INTEGER,
-                count INTEGER DEFAULT 0,
-                window_start TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                PRIMARY KEY (user_id, chat_id)
-            );
-            CREATE TABLE IF NOT EXISTS whitelisted_links (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                chat_id INTEGER,
-                link TEXT,
-                UNIQUE(chat_id, link)
-            );
-            CREATE TABLE IF NOT EXISTS antifake_numbers (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                chat_id INTEGER,
-                prefix TEXT,
-                UNIQUE(chat_id, prefix)
-            );
-            CREATE TABLE IF NOT EXISTS custom_filters (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                chat_id INTEGER,
-                keyword TEXT,
-                reply TEXT,
-                UNIQUE(chat_id, keyword)
-            );
-            CREATE TABLE IF NOT EXISTS muted_users (
-                chat_id INTEGER,
-                user_id INTEGER,
-                muted_until TIMESTAMP,
-                PRIMARY KEY (chat_id, user_id)
-            );
-        """)
-        await db.commit()
-        await _run_migrations(db)
+    await init_storage()
 
 async def get_settings(chat_id: int) -> dict:
-    async with aiosqlite.connect(DB_PATH) as db:
-        db.row_factory = aiosqlite.Row
-        async with db.execute("SELECT * FROM group_settings WHERE chat_id=?", (chat_id,)) as cur:
-            row = await cur.fetchone()
-            if row:
-                return dict(row)
-            await db.execute("INSERT OR IGNORE INTO group_settings (chat_id) VALUES (?)", (chat_id,))
-            await db.commit()
-            async with db.execute("SELECT * FROM group_settings WHERE chat_id=?", (chat_id,)) as cur2:
-                return dict(await cur2.fetchone())
+    return await load_chat(chat_id)
 
 async def update_setting(chat_id: int, key: str, value):
-    async with aiosqlite.connect(DB_PATH) as db:
-        await db.execute(
-            f"INSERT INTO group_settings (chat_id, {key}) VALUES (?, ?) "
-            f"ON CONFLICT(chat_id) DO UPDATE SET {key}=excluded.{key}",
-            (chat_id, value)
-        )
-        await db.commit()
+    await update_chat(chat_id, **{key: value})
 
 async def get_warnings(chat_id: int, user_id: int) -> list:
-    async with aiosqlite.connect(DB_PATH) as db:
-        db.row_factory = aiosqlite.Row
-        async with db.execute(
-            "SELECT * FROM warnings WHERE chat_id=? AND user_id=? ORDER BY created_at DESC",
-            (chat_id, user_id)
-        ) as cur:
-            return [dict(r) for r in await cur.fetchall()]
+    data = await load_chat(chat_id)
+    entries = data.get('warnings', {}).get(str(user_id), [])
+    return sorted(entries, key=lambda w: w.get('created_at', ''), reverse=True)
 
 async def add_warning(chat_id: int, user_id: int, reason: str) -> int:
-    async with aiosqlite.connect(DB_PATH) as db:
-        await db.execute(
-            "INSERT INTO warnings (chat_id, user_id, reason) VALUES (?, ?, ?)",
-            (chat_id, user_id, reason)
-        )
-        await db.commit()
-        async with db.execute(
-            "SELECT COUNT(*) FROM warnings WHERE chat_id=? AND user_id=?",
-            (chat_id, user_id)
-        ) as cur:
-            return (await cur.fetchone())[0]
+    data = await load_chat(chat_id)
+    warnings = data.setdefault('warnings', {})
+    user_warnings = warnings.setdefault(str(user_id), [])
+    user_warnings.append({'reason': reason, 'created_at': datetime.datetime.now().isoformat(timespec='minutes')})
+    await save_chat(chat_id, data)
+    return len(user_warnings)
 
 async def reset_warnings(chat_id: int, user_id: int):
-    async with aiosqlite.connect(DB_PATH) as db:
-        await db.execute("DELETE FROM warnings WHERE chat_id=? AND user_id=?", (chat_id, user_id))
-        await db.commit()
+    data = await load_chat(chat_id)
+    data.get('warnings', {}).pop(str(user_id), None)
+    await save_chat(chat_id, data)
+
+async def remove_last_warning(chat_id: int, user_id: int) -> int:
+    data = await load_chat(chat_id)
+    warnings = data.get('warnings', {})
+    entries = warnings.get(str(user_id), [])
+    if not entries:
+        return 0
+    entries.sort(key=lambda w: w.get('created_at', ''))
+    entries.pop()
+    if entries:
+        warnings[str(user_id)] = entries
+    else:
+        warnings.pop(str(user_id), None)
+    await save_chat(chat_id, data)
+    return len(entries)
+
+async def next_reaction_index(chat_id: int) -> int:
+    data = await load_chat(chat_id)
+    idx = data.get('_reaction_index', 0)
+    data['_reaction_index'] = idx + 1
+    await save_chat(chat_id, data)
+    return idx
 
 async def get_banned_words(chat_id: int) -> list:
-    async with aiosqlite.connect(DB_PATH) as db:
-        async with db.execute("SELECT word FROM banned_words WHERE chat_id=?", (chat_id,)) as cur:
-            return [r[0] for r in await cur.fetchall()]
+    data = await load_chat(chat_id)
+    return data.get('antiword_words', [])
 
 async def add_banned_word(chat_id: int, word: str):
-    async with aiosqlite.connect(DB_PATH) as db:
-        await db.execute("INSERT OR IGNORE INTO banned_words (chat_id, word) VALUES (?, ?)", (chat_id, word.lower()))
-        await db.commit()
+    data = await load_chat(chat_id)
+    words = data.setdefault('antiword_words', [])
+    word = word.lower()
+    if word not in words:
+        words.append(word)
+    await save_chat(chat_id, data)
 
 async def remove_banned_word(chat_id: int, word: str):
-    async with aiosqlite.connect(DB_PATH) as db:
-        await db.execute("DELETE FROM banned_words WHERE chat_id=? AND word=?", (chat_id, word.lower()))
-        await db.commit()
+    data = await load_chat(chat_id)
+    word = word.lower()
+    data['antiword_words'] = [w for w in data.get('antiword_words', []) if w != word]
+    await save_chat(chat_id, data)
 
 async def get_whitelisted_links(chat_id: int) -> list:
-    async with aiosqlite.connect(DB_PATH) as db:
-        async with db.execute("SELECT link FROM whitelisted_links WHERE chat_id=?", (chat_id,)) as cur:
-            return [r[0] for r in await cur.fetchall()]
+    data = await load_chat(chat_id)
+    return data.get('antilink_whitelist', [])
 
 async def add_whitelist_link(chat_id: int, link: str):
-    async with aiosqlite.connect(DB_PATH) as db:
-        await db.execute("INSERT OR IGNORE INTO whitelisted_links (chat_id, link) VALUES (?, ?)", (chat_id, link))
-        await db.commit()
+    data = await load_chat(chat_id)
+    links = data.setdefault('antilink_whitelist', [])
+    link = link.lower().strip()
+    if link not in links:
+        links.append(link)
+    await save_chat(chat_id, data)
 
 async def remove_whitelist_link(chat_id: int, link: str):
-    async with aiosqlite.connect(DB_PATH) as db:
-        await db.execute("DELETE FROM whitelisted_links WHERE chat_id=? AND link=?", (chat_id, link))
-        await db.commit()
+    data = await load_chat(chat_id)
+    link = link.lower().strip()
+    data['antilink_whitelist'] = [l for l in data.get('antilink_whitelist', []) if l != link]
+    await save_chat(chat_id, data)
 
 async def get_spam_count(chat_id: int, user_id: int, window: int) -> int:
-    async with aiosqlite.connect(DB_PATH) as db:
-        async with db.execute(
-            "SELECT count, window_start FROM spam_tracker WHERE chat_id=? AND user_id=?",
-            (chat_id, user_id)
-        ) as cur:
-            row = await cur.fetchone()
-            if not row:
-                return 0
-            import datetime
-            ws = datetime.datetime.fromisoformat(row[1])
-            if (datetime.datetime.now() - ws).seconds > window:
-                await db.execute(
-                    "UPDATE spam_tracker SET count=1, window_start=CURRENT_TIMESTAMP WHERE chat_id=? AND user_id=?",
-                    (chat_id, user_id)
-                )
-                await db.commit()
-                return 1
-            return row[0]
+    data = await load_chat(chat_id)
+    tracker = data.get('spam_tracker', {}).get(str(user_id))
+    if not tracker:
+        return 0
+    ws = datetime.datetime.fromisoformat(tracker['window_start'])
+    if (datetime.datetime.now() - ws).total_seconds() > window:
+        return 0
+    return tracker.get('count', 0)
 
 async def increment_spam(chat_id: int, user_id: int) -> int:
-    async with aiosqlite.connect(DB_PATH) as db:
-        await db.execute(
-            "INSERT INTO spam_tracker (chat_id, user_id, count) VALUES (?, ?, 1) "
-            "ON CONFLICT(user_id, chat_id) DO UPDATE SET count=count+1",
-            (chat_id, user_id)
-        )
-        await db.commit()
-        async with db.execute(
-            "SELECT count FROM spam_tracker WHERE chat_id=? AND user_id=?",
-            (chat_id, user_id)
-        ) as cur:
-            return (await cur.fetchone())[0]
+    data = await load_chat(chat_id)
+    tracker = data.setdefault('spam_tracker', {})
+    entry = tracker.get(str(user_id))
+    window = data.get('antispam_window', 10)
+    now = datetime.datetime.now()
+    if entry:
+        ws = datetime.datetime.fromisoformat(entry['window_start'])
+        if (now - ws).total_seconds() > window:
+            entry = {'count': 1, 'window_start': now.isoformat()}
+        else:
+            entry['count'] = entry.get('count', 0) + 1
+    else:
+        entry = {'count': 1, 'window_start': now.isoformat()}
+    tracker[str(user_id)] = entry
+    await save_chat(chat_id, data)
+    return entry['count']
 
 async def reset_spam(chat_id: int, user_id: int):
-    async with aiosqlite.connect(DB_PATH) as db:
-        await db.execute("DELETE FROM spam_tracker WHERE chat_id=? AND user_id=?", (chat_id, user_id))
-        await db.commit()
+    data = await load_chat(chat_id)
+    data.get('spam_tracker', {}).pop(str(user_id), None)
+    await save_chat(chat_id, data)
 
 async def get_filters(chat_id: int) -> list:
-    async with aiosqlite.connect(DB_PATH) as db:
-        db.row_factory = aiosqlite.Row
-        async with db.execute("SELECT keyword, reply FROM custom_filters WHERE chat_id=?", (chat_id,)) as cur:
-            return [dict(r) for r in await cur.fetchall()]
+    data = await load_chat(chat_id)
+    return [{'keyword': k, 'reply': v} for k, v in data.get('filters', {}).items()]
 
 async def add_filter(chat_id: int, keyword: str, reply: str):
-    async with aiosqlite.connect(DB_PATH) as db:
-        await db.execute(
-            "INSERT OR REPLACE INTO custom_filters (chat_id, keyword, reply) VALUES (?, ?, ?)",
-            (chat_id, keyword.lower(), reply)
-        )
-        await db.commit()
+    data = await load_chat(chat_id)
+    data.setdefault('filters', {})[keyword.lower()] = reply
+    await save_chat(chat_id, data)
 
 async def remove_filter(chat_id: int, keyword: str):
-    async with aiosqlite.connect(DB_PATH) as db:
-        await db.execute("DELETE FROM custom_filters WHERE chat_id=? AND keyword=?", (chat_id, keyword.lower()))
-        await db.commit()
+    data = await load_chat(chat_id)
+    data.get('filters', {}).pop(keyword.lower(), None)
+    await save_chat(chat_id, data)
 
 async def get_antifake_prefixes(chat_id: int) -> list:
-    async with aiosqlite.connect(DB_PATH) as db:
-        async with db.execute("SELECT prefix FROM antifake_numbers WHERE chat_id=?", (chat_id,)) as cur:
-            return [r[0] for r in await cur.fetchall()]
+    data = await load_chat(chat_id)
+    return data.get('antifake_prefixes', [])
 
 async def add_antifake_prefix(chat_id: int, prefix: str):
-    async with aiosqlite.connect(DB_PATH) as db:
-        await db.execute("INSERT OR IGNORE INTO antifake_numbers (chat_id, prefix) VALUES (?, ?)", (chat_id, prefix))
-        await db.commit()
+    data = await load_chat(chat_id)
+    prefixes = data.setdefault('antifake_prefixes', [])
+    if prefix not in prefixes:
+        prefixes.append(prefix)
+    await save_chat(chat_id, data)
 
 async def remove_antifake_prefix(chat_id: int, prefix: str):
-    async with aiosqlite.connect(DB_PATH) as db:
-        await db.execute("DELETE FROM antifake_numbers WHERE chat_id=? AND prefix=?", (chat_id, prefix))
-        await db.commit()
+    data = await load_chat(chat_id)
+    data['antifake_prefixes'] = [p for p in data.get('antifake_prefixes', []) if p != prefix]
+    await save_chat(chat_id, data)
+
+async def get_muted_user(chat_id: int, user_id: int):
+    data = await load_chat(chat_id)
+    return data.get('muted_users', {}).get(str(user_id))
+
+async def set_muted_user(chat_id: int, user_id: int, until_iso):
+    data = await load_chat(chat_id)
+    muted = data.setdefault('muted_users', {})
+    if until_iso is None:
+        muted.pop(str(user_id), None)
+    else:
+        muted[str(user_id)] = until_iso
+    await save_chat(chat_id, data)
+
+async def sync_chat_index(chat_id: int, chat_title: str, chat_type: str, bot_is_admin: bool, admin_user_ids: list):
+    await update_index(chat_id, chat_title, chat_type, bot_is_admin, admin_user_ids)
+    await update_chat(chat_id, chat_title=chat_title, chat_type=chat_type, bot_is_admin=bot_is_admin, admins_cache=admin_user_ids)
+
+async def drop_chat_from_index(chat_id: int):
+    await remove_from_index(chat_id)
+
+async def list_managed_chats(user_id: int) -> list:
+    return await get_managed_chats_for_user(user_id)
+
+async def note_chat_admin_seen(chat_id: int, chat_title: str, chat_type: str, user_id: int, is_admin: bool, bot_is_admin: bool):
+    await note_admin_seen(chat_id, chat_title, chat_type, user_id, is_admin, bot_is_admin)
