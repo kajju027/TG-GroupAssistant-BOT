@@ -27,7 +27,7 @@ async def cmd_filters(message: Message):
     text = '🔍 <b>Active Filters</b>\n\n'
     for f in filters:
         preview = f['reply'][:30] + ('...' if len(f['reply']) > 30 else '')
-        text += f'• <code>{f['keyword']}</code> → {preview}\n'
+        text += f"• <code>{f['keyword']}</code> → {preview}\n"
     await message.answer(text)
 
 @router.message(Command('stop'), F.chat.type.in_({'group', 'supergroup'}))
