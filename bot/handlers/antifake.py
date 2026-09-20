@@ -48,7 +48,7 @@ async def cmd_antifake(message: Message, is_admin: bool=False):
         s = await get_settings(message.chat.id)
         status = '✅ ON' if s['antifake'] else '❌ OFF'
         prefixes = await get_antifake_prefixes(message.chat.id)
-        await message.answer(f'📵 <b>Anti-Fake:</b> {status}\n<b>Mode:</b> {s['antifake_mode'].upper()}\n<b>Prefixes:</b> {(', '.join(prefixes) if prefixes else 'None')}\n\n<b>Usage:</b> /antifake on|off|add [+prefix]|remove [+prefix]|list|mode [blacklist/whitelist]')
+        await message.answer(f"📵 <b>Anti-Fake:</b> {status}\n<b>Mode:</b> {s['antifake_mode'].upper()}\n<b>Prefixes:</b> {(', '.join(prefixes) if prefixes else 'None')}\n\n<b>Usage:</b> /antifake on|off|add [+prefix]|remove [+prefix]|list|mode [blacklist/whitelist]")
         return
     cmd = parts[1].lower()
     if cmd == 'on':
