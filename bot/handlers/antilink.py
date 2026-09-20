@@ -26,7 +26,7 @@ async def _apply_action(message: Message, action: str):
             except Exception:
                 pass
         else:
-            await answer_and_autodelete(message, f'🔗 <b>Link removed.</b>\n⚠️ {mention} has been warned ({count}/{s['warn_limit']})\n<b>Reason:</b> Sent a link')
+            await answer_and_autodelete(message, f"🔗 <b>Link removed.</b>\n⚠️ {mention} has been warned ({count}/{s['warn_limit']})\n<b>Reason:</b> Sent a link")
     elif action == 'kick':
         await answer_and_autodelete(message, f'🚪 {mention} was kicked for sending a link.')
         try:
@@ -52,7 +52,7 @@ async def cmd_antilink(message: Message, is_admin: bool=False):
     if len(parts) < 2:
         s = await get_settings(message.chat.id)
         status = '✅ ON' if s['antilink'] else '❌ OFF'
-        await message.answer(f'🔗 <b>Anti-Link:</b> {status}\n<b>Action:</b> {s['antilink_action'].upper()}\n\n<b>Usage:</b>\n/antilink on|off\n/antilink action [delete/warn/kick/ban]\n/antilink allow [domain]\n/antilink disallow [domain]\n/antilink domains')
+        await message.answer(f"🔗 <b>Anti-Link:</b> {status}\n<b>Action:</b> {s['antilink_action'].upper()}\n\n<b>Usage:</b>\n/antilink on|off\n/antilink action [delete/warn/kick/ban]\n/antilink allow [domain]\n/antilink disallow [domain]\n/antilink domains")
         return
     cmd = parts[1].lower()
     if cmd == 'on':
