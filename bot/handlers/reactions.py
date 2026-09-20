@@ -22,7 +22,7 @@ async def _is_authorized(message: Message) -> bool:
 def _status_text(s: dict) -> str:
     status = '✅ ON' if s.get('reaction_enabled') else '❌ OFF'
     emojis = s.get('reaction_emojis') or ['👍']
-    return f'🎭 <b>Auto-Reaction Settings</b>\n\n<b>Status:</b> {status}\n<b>Emojis:</b> {' '.join(emojis)}\n\nEvery new post gets one of these emojis a few seconds after it arrives. With more than one emoji set, each new post cycles to the next one in order.\n\n<b>Usage:</b>\n/reaction on — enable\n/reaction off — disable\n/reaction emoji [emoji1 emoji2 ...] — set one or more emojis\n\nWorks in both groups and channels.'
+    return f"🎭 <b>Auto-Reaction Settings</b>\n\n<b>Status:</b> {status}\n<b>Emojis:</b> {' '.join(emojis)}\n\nEvery new post gets one of these emojis a few seconds after it arrives. With more than one emoji set, each new post cycles to the next one in order.\n\n<b>Usage:</b>\n/reaction on — enable\n/reaction off — disable\n/reaction emoji [emoji1 emoji2 ...] — set one or more emojis\n\nWorks in both groups and channels."
 
 async def _handle_reaction_command(message: Message):
     if not await _is_authorized(message):
@@ -54,9 +54,9 @@ async def _handle_reaction_command(message: Message):
             return
         await update_setting(message.chat.id, 'reaction_emojis', valid)
         await update_setting(message.chat.id, '_reaction_index', 0)
-        msg = f'✅ Reaction emojis set to: {' '.join(valid)}'
+        msg = f"✅ Reaction emojis set to: {' '.join(valid)}"
         if invalid:
-            msg += f'\n⚠️ Skipped unsupported: {' '.join(invalid)}'
+            msg += f"\n⚠️ Skipped unsupported: {' '.join(invalid)}"
         await message.answer(msg)
     else:
         await message.answer(_status_text(s))
