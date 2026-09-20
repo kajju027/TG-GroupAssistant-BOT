@@ -2,7 +2,7 @@ import asyncio
 import json
 import os
 from bot.core.config import CHATS_DIR
-_DEFAULT_SETTINGS = {'chat_title': '', 'chat_type': '', 'antilink': False, 'antilink_action': 'delete', 'antilink_whitelist': [], 'antiword': False, 'antiword_action': 'delete', 'antiword_words': [], 'antispam': False, 'antispam_limit': 5, 'antispam_window': 10, 'antifake': False, 'antifake_mode': 'blacklist', 'antifake_prefixes': [], 'welcome': True, 'welcome_msg': 'Welcome {mention} to {group}!', 'goodbye': True, 'goodbye_msg': 'Goodbye {mention}, we will miss you!', 'warn_limit': 3, 'warn_action': 'kick', 'mute_on_join': False, 'reaction_enabled': False, 'reaction_emojis': ['👍'], 'reaction_mode': 'sequential', 'filters': {}, 'warnings': {}, 'spam_tracker': {}, 'muted_users': {}, 'admins_cache': [], 'bot_is_admin': False}
+_DEFAULT_SETTINGS = {'chat_title': '', 'chat_type': '', 'antilink': False, 'antilink_action': 'delete', 'antilink_whitelist': [], 'antiword': False, 'antiword_action': 'delete', 'antiword_words': [], 'antispam': False, 'antispam_limit': 5, 'antispam_window': 10, 'antifake': False, 'antifake_mode': 'blacklist', 'antifake_prefixes': [], 'welcome': True, 'welcome_msg': 'Welcome {mention} to {group}!', 'goodbye': True, 'goodbye_msg': 'Goodbye {mention}, we will miss you!', 'warn_limit': 3, 'warn_action': 'kick', 'mute_on_join': False, 'reaction_enabled': False, 'reaction_emojis': ['👍'], 'reaction_mode': 'automatic', 'filters': {}, 'warnings': {}, 'spam_tracker': {}, 'muted_users': {}, 'admins_cache': [], 'bot_is_admin': False}
 _locks = {}
 _lock_guard = asyncio.Lock()
 
