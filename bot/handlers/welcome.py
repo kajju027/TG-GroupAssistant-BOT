@@ -39,7 +39,7 @@ async def cmd_welcome(message: Message, is_admin: bool=False):
     if len(parts) < 2:
         s = await get_settings(message.chat.id)
         status = '✅ ON' if s['welcome'] else '❌ OFF'
-        await message.answer(f'👋 <b>Welcome:</b> {status}\n<b>Message:</b>\n<code>{s['welcome_msg']}</code>\n\n<b>Usage:</b> /welcome on|off')
+        await message.answer(f"👋 <b>Welcome:</b> {status}\n<b>Message:</b>\n<code>{s['welcome_msg']}</code>\n\n<b>Usage:</b> /welcome on|off")
         return
     cmd = parts[1].lower()
     if cmd == 'on':
@@ -58,7 +58,7 @@ async def cmd_goodbye(message: Message, is_admin: bool=False):
     if len(parts) < 2:
         s = await get_settings(message.chat.id)
         status = '✅ ON' if s['goodbye'] else '❌ OFF'
-        await message.answer(f'👋 <b>Goodbye:</b> {status}\n<b>Message:</b>\n<code>{s['goodbye_msg']}</code>\n\n<b>Usage:</b> /goodbye on|off')
+        await message.answer(f"👋 <b>Goodbye:</b> {status}\n<b>Message:</b>\n<code>{s['goodbye_msg']}</code>\n\n<b>Usage:</b> /goodbye on|off")
         return
     cmd = parts[1].lower()
     if cmd == 'on':
