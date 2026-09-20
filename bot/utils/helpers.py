@@ -77,7 +77,9 @@ def groups_picker_kb(chats: list) -> InlineKeyboardMarkup:
     rows = []
     for chat in chats:
         icon = '📢' if chat['type'] == 'channel' else '👥'
-        rows.append([InlineKeyboardButton(text=f'{icon} {chat['title']}', callback_data=f'panel:open:{chat['chat_id']}')])
+        title = chat['title']
+        chat_id = chat['chat_id']
+        rows.append([InlineKeyboardButton(text=f'{icon} {title}', callback_data=f'panel:open:{chat_id}')])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 def settings_main_kb(chat_id: int) -> InlineKeyboardMarkup:
