@@ -46,7 +46,7 @@ async def cmd_warn(message: Message, is_admin: bool=False):
     count = await add_warning(message.chat.id, uid, reason)
     limit = s['warn_limit']
     if count >= limit:
-        await message.answer(f'⚠️ {mention} has reached the warn limit ({count}/{limit})!\n<b>Action:</b> {s['warn_action'].upper()}')
+        await message.answer(f"⚠️ {mention} has reached the warn limit ({count}/{limit})!\n<b>Action:</b> {s['warn_action'].upper()}")
         await _apply_warn_action(message, uid, s['warn_action'], mention)
         await reset_warnings(message.chat.id, uid)
     else:
@@ -83,9 +83,12 @@ async def cmd_warns(message: Message):
     if not warns:
         await message.answer(f'✅ {mention} has no warnings.')
         return
-    text = f'⚠️ <b>Warnings for {mention}: {len(warns)}/{s['warn_limit']}</b>\n\n'
+    warn_limit = s['warn_limit']
+    text = f'⚠️ <b>Warnings for {mention}: {len(warns)}/{warn_limit}</b>\n\n'
     for i, w in enumerate(warns, 1):
-        text += f'{i}. {w['reason']} — <i>{w['created_at'][:16]}</i>\n'
+        reason = w['reason']
+        created_at = w['created_at'][:16]
+        text += f'{i}. {reason} — <i>{created_at}</i>\n'
     await message.answer(text)
 
 @router.message(Command('resetwarns'), F.chat.type.in_({'group', 'supergroup'}))
@@ -108,7 +111,7 @@ async def cmd_warnlimit(message: Message, is_admin: bool=False):
     parts = message.text.split()
     if len(parts) < 2:
         s = await get_settings(message.chat.id)
-        await message.answer(f'Current warn limit: <b>{s['warn_limit']}</b>\nUsage: /warnlimit [number]')
+        await message.answer(f"Current warn limit: <b>{s['warn_limit']}</b>\nUsage: /warnlimit [number]")
         return
     try:
         n = int(parts[1])
@@ -127,7 +130,7 @@ async def cmd_warnaction(message: Message, is_admin: bool=False):
     parts = message.text.split()
     if len(parts) < 2:
         s = await get_settings(message.chat.id)
-        await message.answer(f'Current action: <b>{s['warn_action'].upper()}</b>\nUsage: /warnaction kick|ban|mute')
+        await message.answer(f"Current action: <b>{s['warn_action'].upper()}</b>\nUsage: /warnaction kick|ban|mute")
         return
     action = parts[1].lower()
     if action not in ('kick', 'ban', 'mute'):
