@@ -16,7 +16,7 @@ async def cmd_antispam(message: Message, is_admin: bool=False):
     if len(parts) < 2:
         s = await get_settings(message.chat.id)
         status = '✅ ON' if s['antispam'] else '❌ OFF'
-        await message.answer(f'🚫 <b>Anti-Spam:</b> {status}\n<b>Limit:</b> {s['antispam_limit']} messages\n<b>Window:</b> {s['antispam_window']} seconds\n\n<b>Usage:</b> /antispam on|off|limit [n]|window [s]')
+        await message.answer(f"🚫 <b>Anti-Spam:</b> {status}\n<b>Limit:</b> {s['antispam_limit']} messages\n<b>Window:</b> {s['antispam_window']} seconds\n\n<b>Usage:</b> /antispam on|off|limit [n]|window [s]")
         return
     cmd = parts[1].lower()
     if cmd == 'on':
