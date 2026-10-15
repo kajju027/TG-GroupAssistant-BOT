@@ -1,6 +1,7 @@
 from aiogram import Router, F
 from aiogram.types import Message
 from aiogram.filters import Command
+from aiogram.dispatcher.event.bases import SkipHandler
 from bot.database import get_filters, add_filter, remove_filter
 router = Router()
 
@@ -46,10 +47,11 @@ async def cmd_stop(message: Message, is_admin: bool=False):
 @router.message(F.chat.type.in_({'group', 'supergroup'}), F.text, ~F.text.startswith('/'))
 async def check_filters(message: Message):
     if not message.text:
-        return
+        raise SkipHandler
     filters = await get_filters(message.chat.id)
-    text_lower = message.text.lower()
-    for f in filters:
-        if f['keyword'] in text_lower:
-            await message.answer(f['reply'])
+    text_lower = message.text.casefold()
+    for item in filters:
+        if item['keyword'] and item['keyword'].casefold() in text_lower:
+            await message.answer(item['reply'])
             return
+    raise SkipHandler
