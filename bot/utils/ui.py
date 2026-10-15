@@ -16,21 +16,25 @@ def hdr(title: str) -> str:
     return f"<b>╔══〔 {sc(title)} 〕══╗</b>"
 
 
-def ftr() -> str:
-    return "<b>╚══════════════════════╝</b>"
+def ftr(tag: str = "") -> str:
+    tag_part = f" {sc(tag)}" if tag else ""
+    return f"<b>╚═══════════════════╝</b>{tag_part}"
 
 
 def sep() -> str:
-    return "  <code>━━━━━━━━━━━━━━━━━━━━━</code>"
+    return "  <code>━━━━━━━━━━━━━━━━━━━━</code>"
 
 
 def row(label: str, value: str, icon: str = "▸") -> str:
     return f"  {icon} <b>{sc(label)}:</b>  {value}"
 
 
-def box(title: str, lines: list[str]) -> str:
-    body = "\n".join(lines)
-    return f"{hdr(title)}\n{body}\n{ftr()}"
+def box(title: str, lines: list[str], footer_tag: str = "") -> str:
+    return f"{hdr(title)}\n" + "\n".join(lines) + f"\n{ftr(footer_tag)}"
+
+
+def quote(text: str) -> str:
+    return f"<blockquote>{text}</blockquote>"
 
 
 def bold(t: str) -> str:
@@ -39,6 +43,10 @@ def bold(t: str) -> str:
 
 def mono(t: str) -> str:
     return f"<code>{t}</code>"
+
+
+def italic(t: str) -> str:
+    return f"<i>{t}</i>"
 
 
 def link(name: str, uid: int) -> str:
@@ -63,3 +71,22 @@ def rand_emoji() -> str:
 
 def status_icon(on: bool) -> str:
     return "✅" if on else "❌"
+
+
+def fmt_size(b: int) -> str:
+    if b < 1024:
+        return f"{b} B"
+    if b < 1024 ** 2:
+        return f"{b / 1024:.1f} KB"
+    return f"{b / 1024 / 1024:.1f} MB"
+
+
+def fmt_dur(s) -> str:
+    if s is None:
+        return sc("N/A")
+    s = int(s)
+    m, sec = divmod(s, 60)
+    h, m = divmod(m, 60)
+    if h:
+        return f"{h}:{m:02d}:{sec:02d}"
+    return f"{m}:{sec:02d}"
