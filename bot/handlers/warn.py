@@ -77,7 +77,6 @@ async def cmd_warns(message: Message):
             return
         uid = message.from_user.id
         mention = mention_by_name(uid, message.from_user.full_name)
-        name = message.from_user.full_name
     s = await get_settings(message.chat.id)
     warns = await get_warnings(message.chat.id, uid)
     if not warns:
