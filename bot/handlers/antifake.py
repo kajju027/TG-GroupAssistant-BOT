@@ -1,82 +1,52 @@
-from aiogram import Router, F
-from aiogram.types import Message, ChatMemberUpdated
+from aiogram import F, Router
+from aiogram.dispatcher.event.bases import SkipHandler
 from aiogram.filters import Command, ChatMemberUpdatedFilter, JOIN_TRANSITION
-from bot.database import get_settings, update_setting, get_antifake_prefixes, add_antifake_prefix, remove_antifake_prefix
-from bot.utils.helpers import mention_by_name
+from aiogram.types import ChatMemberUpdated, Message
+from bot.database import add_antifake_prefix, get_antifake_prefixes, get_settings, remove_antifake_prefix, update_setting
 router = Router()
-
-def _get_phone_prefix(phone: str) -> str:
-    phone = phone.replace('+', '').replace(' ', '')
-    for length in [3, 2, 1]:
-        if len(phone) >= length:
-            return '+' + phone[:length]
-    return '+' + phone
-
-async def _is_fake(chat_id: int, user_id: int, bot) -> bool:
-    s = await get_settings(chat_id)
-    if not s['antifake']:
-        return False
-    prefixes = await get_antifake_prefixes(chat_id)
-    if not prefixes:
-        return False
-    try:
-        member = await bot.get_chat_member(chat_id, user_id)
-        phone = getattr(member.user, 'phone_number', None)
-    except Exception:
-        return False
-    if not phone:
-        return s['antifake_mode'] == 'whitelist'
-    user_prefix = _get_phone_prefix(phone)
-    if s['antifake_mode'] == 'blacklist':
-        return any((user_prefix.startswith(p) for p in prefixes))
-    return not any((user_prefix.startswith(p) for p in prefixes))
 
 @router.chat_member(ChatMemberUpdatedFilter(JOIN_TRANSITION))
 async def on_member_join(event: ChatMemberUpdated):
-    if await _is_fake(event.chat.id, event.new_chat_member.user.id, event.bot):
-        mention = mention_by_name(event.new_chat_member.user.id, event.new_chat_member.user.full_name)
-        await event.bot.ban_chat_member(event.chat.id, event.new_chat_member.user.id)
-        await event.bot.send_message(event.chat.id, f'📵 {mention} was removed <b>(fake/restricted number)</b>.')
+    raise SkipHandler
 
 @router.message(Command('antifake'), F.chat.type.in_({'group', 'supergroup'}))
 async def cmd_antifake(message: Message, is_admin: bool=False):
     if not is_admin:
         await message.answer('❌ <b>Admins only.</b>')
         return
-    parts = message.text.split()
+    parts = (message.text or '').split()
     if len(parts) < 2:
-        s = await get_settings(message.chat.id)
-        status = '✅ ON' if s['antifake'] else '❌ OFF'
+        settings = await get_settings(message.chat.id)
         prefixes = await get_antifake_prefixes(message.chat.id)
-        await message.answer(f"📵 <b>Anti-Fake:</b> {status}\n<b>Mode:</b> {s['antifake_mode'].upper()}\n<b>Prefixes:</b> {(', '.join(prefixes) if prefixes else 'None')}\n\n<b>Usage:</b> /antifake on|off|add [+prefix]|remove [+prefix]|list|mode [blacklist/whitelist]")
+        await message.answer(f"📵 <b>Anti-Fake Number</b>\n\nStatus: {('✅ ON' if settings['antifake'] else '❌ OFF')}\nMode: {settings['antifake_mode'].upper()}\nPrefixes: {(', '.join(prefixes) if prefixes else 'None')}\n\n⚠️ Telegram does not provide member phone numbers to bots, so this feature cannot automatically remove members. The stored prefix list is retained for future/manual workflows.")
         return
-    cmd = parts[1].lower()
-    if cmd == 'on':
+    command = parts[1].lower()
+    if command == 'on':
         await update_setting(message.chat.id, 'antifake', True)
-        await message.answer('✅ <b>Anti-Fake enabled.</b>')
-    elif cmd == 'off':
+        await message.answer('✅ Anti-Fake preferences enabled (automatic phone checks are unavailable via Telegram Bot API).')
+    elif command == 'off':
         await update_setting(message.chat.id, 'antifake', False)
-        await message.answer('❌ <b>Anti-Fake disabled.</b>')
-    elif cmd == 'add' and len(parts) > 2:
+        await message.answer('❌ Anti-Fake preferences disabled.')
+    elif command == 'add' and len(parts) > 2:
         prefix = parts[2] if parts[2].startswith('+') else '+' + parts[2]
+        if not prefix[1:].isdigit():
+            await message.answer('❌ A prefix must contain digits, for example <code>+91</code>.')
+            return
         await add_antifake_prefix(message.chat.id, prefix)
         await message.answer(f'✅ Added prefix: <code>{prefix}</code>')
-    elif cmd == 'remove' and len(parts) > 2:
+    elif command == 'remove' and len(parts) > 2:
         prefix = parts[2] if parts[2].startswith('+') else '+' + parts[2]
         await remove_antifake_prefix(message.chat.id, prefix)
         await message.answer(f'✅ Removed prefix: <code>{prefix}</code>')
-    elif cmd == 'list':
+    elif command == 'list':
         prefixes = await get_antifake_prefixes(message.chat.id)
-        if prefixes:
-            await message.answer('📵 <b>Prefixes:</b>\n' + '\n'.join((f'• <code>{p}</code>' for p in prefixes)))
-        else:
-            await message.answer('No prefixes set.')
-    elif cmd == 'mode' and len(parts) > 2:
+        await message.answer('📵 <b>Saved prefixes:</b>\n' + '\n'.join((f'• <code>{item}</code>' for item in prefixes)) if prefixes else 'No prefixes set.')
+    elif command == 'mode' and len(parts) > 2:
         mode = parts[2].lower()
-        if mode not in ('blacklist', 'whitelist'):
+        if mode not in {'blacklist', 'whitelist'}:
             await message.answer('❌ Valid modes: blacklist, whitelist')
             return
         await update_setting(message.chat.id, 'antifake_mode', mode)
-        await message.answer(f'✅ Mode set to <b>{mode.upper()}</b>.')
+        await message.answer(f'✅ Mode saved as <b>{mode.upper()}</b>.')
     else:
         await message.answer('<b>Usage:</b> /antifake on|off|add [+prefix]|remove [+prefix]|list|mode [blacklist/whitelist]')
