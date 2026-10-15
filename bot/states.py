@@ -1,6 +1,5 @@
 from aiogram.fsm.state import State, StatesGroup
 
-
 class PanelInput(StatesGroup):
     antilink_allow_domain = State()
     antilink_disallow_domain = State()
