@@ -9,7 +9,7 @@ from aiogram.fsm.storage.memory import MemoryStorage
 
 from bot.core.config import BOT_TOKEN, OWNER_ID, TG_API_PROXY, LOG_LEVEL
 from bot.core import database as db
-from bot.middleware.tracking import GroupTrackingMiddleware
+from bot.middlewares.tracking import GroupTrackingMiddleware
 from bot.handlers import start, owner, group, react, download
 
 logging.basicConfig(
