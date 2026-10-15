@@ -22,8 +22,3 @@ class NotBlockedFilter(BaseFilter):
         if message.from_user is None:
             return True
         return not db.is_blocked(message.from_user.id)
-
-
-class GroupFilter(BaseFilter):
-    async def __call__(self, message: Message) -> bool:
-        return message.chat.type in ("group", "supergroup")
