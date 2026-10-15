@@ -9,11 +9,22 @@ ALL_PERMS_OFF = ChatPermissions(can_send_messages=False, can_send_audios=False, 
 ALL_PERMS_ON = ChatPermissions(can_send_messages=True, can_send_audios=True, can_send_documents=True, can_send_photos=True, can_send_videos=True, can_send_video_notes=True, can_send_voice_notes=True, can_send_polls=True, can_send_other_messages=True, can_add_web_page_previews=True, can_change_info=False, can_invite_users=True, can_pin_messages=False)
 
 def _parse_time(time_str: str):
-    match = re.match('^(\\d+)([smhd])$', time_str.lower())
+    match = re.match('^(\\\\d+)([smhd])$', time_str.lower())
     if not match:
         return None
     value, unit = (int(match.group(1)), match.group(2))
+    if value <= 0 or value > 366:
+        return None
     return {'s': datetime.timedelta(seconds=value), 'm': datetime.timedelta(minutes=value), 'h': datetime.timedelta(hours=value), 'd': datetime.timedelta(days=value)}.get(unit)
+
+async def _default_group_permissions(message: Message) -> ChatPermissions:
+    try:
+        chat = await message.bot.get_chat(message.chat.id)
+        if chat.permissions is not None:
+            return chat.permissions
+    except Exception:
+        pass
+    return ALL_PERMS_ON
 
 @router.message(Command('mute'), F.chat.type.in_({'group', 'supergroup'}))
 async def cmd_mute(message: Message, is_admin: bool=False):
@@ -40,7 +51,7 @@ async def cmd_mute(message: Message, is_admin: bool=False):
             duration = td
             time_str = p
             break
-    until = datetime.datetime.now() + duration if duration else None
+    until = datetime.datetime.now(datetime.timezone.utc) + duration if duration else None
     try:
         await message.bot.restrict_chat_member(message.chat.id, uid, permissions=ALL_PERMS_OFF, until_date=until)
         dur_text = f' for <b>{time_str}</b>' if time_str else ' indefinitely'
@@ -56,13 +67,13 @@ async def cmd_unmute(message: Message, is_admin: bool=False):
     uid, name, mention = await get_user_from_message(message)
     if not uid:
         try:
-            await message.bot.set_chat_permissions(message.chat.id, ALL_PERMS_ON)
+            await message.bot.set_chat_permissions(message.chat.id, await _default_group_permissions(message))
             await message.answer('🔊 <b>Group unmuted.</b> Everyone can speak now.')
         except Exception as e:
             await message.answer(f'❌ <b>Failed:</b> {e}')
         return
     try:
-        await message.bot.restrict_chat_member(message.chat.id, uid, permissions=ALL_PERMS_ON)
+        await message.bot.restrict_chat_member(message.chat.id, uid, permissions=await _default_group_permissions(message))
         await message.answer(f'🔊 {mention} has been <b>unmuted</b>.')
     except Exception as e:
         await message.answer(f'❌ <b>Failed:</b> {e}')
@@ -107,7 +118,7 @@ async def cmd_ban(message: Message, is_admin: bool=False):
             duration = td
             time_str = p
             break
-    until = datetime.datetime.now() + duration if duration else None
+    until = datetime.datetime.now(datetime.timezone.utc) + duration if duration else None
     try:
         await message.bot.ban_chat_member(message.chat.id, uid, until_date=until)
         dur_text = f' for <b>{time_str}</b>' if time_str else ' permanently'
