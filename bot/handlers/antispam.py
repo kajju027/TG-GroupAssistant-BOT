@@ -2,7 +2,8 @@ import datetime
 from aiogram import Router, F
 from aiogram.types import Message, ChatPermissions
 from aiogram.filters import Command
-from bot.database import get_settings, update_setting, get_spam_count, increment_spam, reset_spam
+from aiogram.dispatcher.event.bases import SkipHandler
+from bot.database import get_settings, update_setting, increment_spam, reset_spam
 from bot.utils.helpers import is_admin as check_is_admin, mention_by_name
 from bot.utils.autodelete import answer_and_autodelete
 router = Router()
@@ -49,27 +50,25 @@ async def cmd_antispam(message: Message, is_admin: bool=False):
 @router.message(F.chat.type.in_({'group', 'supergroup'}), F.text, ~F.text.startswith('/'))
 async def check_spam(message: Message):
     if not message.from_user:
-        return
+        raise SkipHandler
     if await check_is_admin(message.bot, message.chat.id, message.from_user.id):
-        return
-    s = await get_settings(message.chat.id)
-    if not s['antispam']:
-        return
-    uid = message.from_user.id
+        raise SkipHandler
+    settings = await get_settings(message.chat.id)
+    if not settings['antispam']:
+        raise SkipHandler
+    user_id = message.from_user.id
     chat_id = message.chat.id
-    limit = s['antispam_limit']
-    window = s['antispam_window']
-    await get_spam_count(chat_id, uid, window)
-    new_count = await increment_spam(chat_id, uid)
-    if new_count >= limit:
-        mention = mention_by_name(uid, message.from_user.full_name)
-        await reset_spam(chat_id, uid)
-        try:
-            await message.delete()
-        except Exception:
-            pass
-        await answer_and_autodelete(message, f'🚫 {mention} is spamming! Muted for 5 minutes.')
-        try:
-            await message.bot.restrict_chat_member(chat_id, uid, permissions=ChatPermissions(can_send_messages=False), until_date=datetime.datetime.now() + datetime.timedelta(minutes=5))
-        except Exception:
-            pass
+    new_count = await increment_spam(chat_id, user_id)
+    if new_count < settings['antispam_limit']:
+        raise SkipHandler
+    mention = mention_by_name(user_id, message.from_user.full_name)
+    await reset_spam(chat_id, user_id)
+    try:
+        await message.delete()
+    except Exception:
+        pass
+    await answer_and_autodelete(message, f'🚫 {mention} is spamming! Muted for 5 minutes.')
+    try:
+        await message.bot.restrict_chat_member(chat_id, user_id, permissions=ChatPermissions(can_send_messages=False), until_date=datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(minutes=5))
+    except Exception:
+        pass
