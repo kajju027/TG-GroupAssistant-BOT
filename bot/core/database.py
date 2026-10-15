@@ -43,8 +43,8 @@ def init():
                 val INTEGER DEFAULT 0
             );
         """)
-        for k in ("messages", "reactions", "commands", "music"):
-            c.execute("INSERT OR IGNORE INTO stats (key, val) VALUES (?, 0)", (k,))
+        for k in ("messages", "reactions", "commands", "downloads"):
+            c.execute("INSERT OR IGNORE INTO stats (key,val) VALUES (?,0)", (k,))
         c.commit()
 
 
@@ -55,10 +55,8 @@ def is_allowed(uid: int) -> bool:
 
 def add_allowed(uid: int, username: str, name: str):
     with _c() as c:
-        c.execute(
-            "INSERT OR REPLACE INTO allowed_users (user_id, username, first_name) VALUES (?,?,?)",
-            (uid, username or "", name or ""),
-        )
+        c.execute("INSERT OR REPLACE INTO allowed_users (user_id,username,first_name) VALUES(?,?,?)",
+                  (uid, username or "", name or ""))
         c.commit()
 
 
@@ -80,7 +78,7 @@ def is_blocked(uid: int) -> bool:
 
 def block_user(uid: int):
     with _c() as c:
-        c.execute("INSERT OR IGNORE INTO blocked_users VALUES (?)", (uid,))
+        c.execute("INSERT OR IGNORE INTO blocked_users VALUES(?)", (uid,))
         c.commit()
 
 
@@ -92,7 +90,7 @@ def unblock_user(uid: int):
 
 def ensure_group(chat_id: int, title: str):
     with _c() as c:
-        c.execute("INSERT OR IGNORE INTO groups (chat_id, title) VALUES (?,?)", (chat_id, title or ""))
+        c.execute("INSERT OR IGNORE INTO groups (chat_id,title) VALUES(?,?)", (chat_id, title or ""))
         c.execute("UPDATE groups SET title=? WHERE chat_id=?", (title or "", chat_id))
         c.commit()
 
@@ -133,7 +131,7 @@ def all_groups():
 
 def add_warn(uid: int, cid: int, reason: str) -> int:
     with _c() as c:
-        c.execute("INSERT INTO warnings (user_id, chat_id, reason) VALUES (?,?,?)", (uid, cid, reason))
+        c.execute("INSERT INTO warnings (user_id,chat_id,reason) VALUES(?,?,?)", (uid, cid, reason))
         c.commit()
     return warn_count(uid, cid)
 
