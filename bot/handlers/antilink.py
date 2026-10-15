@@ -2,6 +2,7 @@ import re
 from aiogram import Router, F
 from aiogram.types import Message
 from aiogram.filters import Command
+from aiogram.dispatcher.event.bases import SkipHandler
 from bot.database import get_settings, update_setting, add_whitelist_link, remove_whitelist_link, get_whitelisted_links, add_warning
 from bot.utils.helpers import is_admin as check_is_admin, mention_by_name, is_domain_whitelisted, extract_domain
 from bot.utils.autodelete import answer_and_autodelete
@@ -86,17 +87,18 @@ async def cmd_antilink(message: Message, is_admin: bool=False):
 @router.message(F.chat.type.in_({'group', 'supergroup'}), F.text, ~F.text.startswith('/'))
 async def check_links(message: Message):
     if not message.from_user:
-        return
+        raise SkipHandler
     if await check_is_admin(message.bot, message.chat.id, message.from_user.id):
-        return
-    s = await get_settings(message.chat.id)
-    if not s['antilink']:
-        return
+        raise SkipHandler
+    settings = await get_settings(message.chat.id)
+    if not settings['antilink']:
+        raise SkipHandler
     links = LINK_RE.findall(message.text or '')
     if not links:
-        return
-    whitelist = s.get('antilink_whitelist', [])
+        raise SkipHandler
+    whitelist = settings.get('antilink_whitelist', [])
     for link in links:
         if not is_domain_whitelisted(link, whitelist):
-            await _apply_action(message, s['antilink_action'])
+            await _apply_action(message, settings['antilink_action'])
             return
+    raise SkipHandler
