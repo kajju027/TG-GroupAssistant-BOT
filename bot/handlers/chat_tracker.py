@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from aiogram import Router
 from aiogram.dispatcher.event.bases import SkipHandler
 from aiogram.enums import ChatMemberStatus
