@@ -1,11 +1,18 @@
+from __future__ import annotations
+
 import datetime
-from aiogram import Router, F
-from aiogram.types import Message, ChatPermissions
+
+from aiogram import F, Router
 from aiogram.filters import Command
-from bot.database import get_settings, update_setting, get_warnings, add_warning, reset_warnings, remove_last_warning
+from aiogram.types import ChatPermissions, Message
+
+from bot.database import get_settings, get_warnings, add_warning, reset_warnings, remove_last_warning, update_setting
+from bot.utils import anim
 from bot.utils.helpers import is_admin as check_is_admin, get_user_from_message, mention_by_name
 from bot.utils.autodelete import answer_and_autodelete
+
 router = Router()
+
 
 async def _apply_warn_action(message: Message, user_id: int, action: str, mention: str):
     if action == 'kick':
@@ -24,12 +31,18 @@ async def _apply_warn_action(message: Message, user_id: int, action: str, mentio
     elif action == 'mute':
         await answer_and_autodelete(message, f'🔇 {mention} was muted for exceeding the warn limit.')
         try:
-            await message.bot.restrict_chat_member(message.chat.id, user_id, permissions=ChatPermissions(can_send_messages=False), until_date=datetime.datetime.now() + datetime.timedelta(hours=1))
+            await message.bot.restrict_chat_member(
+                message.chat.id,
+                user_id,
+                permissions=ChatPermissions(can_send_messages=False),
+                until_date=datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(hours=1),
+            )
         except Exception:
             pass
 
+
 @router.message(Command('warn'), F.chat.type.in_({'group', 'supergroup'}))
-async def cmd_warn(message: Message, is_admin: bool=False):
+async def cmd_warn(message: Message, is_admin: bool = False):
     if not is_admin:
         await message.answer('❌ <b>Admins only.</b>')
         return
@@ -46,14 +59,17 @@ async def cmd_warn(message: Message, is_admin: bool=False):
     count = await add_warning(message.chat.id, uid, reason)
     limit = s['warn_limit']
     if count >= limit:
-        await message.answer(f"⚠️ {mention} has reached the warn limit ({count}/{limit})!\n<b>Action:</b> {s['warn_action'].upper()}")
+        text = f"⚠️ {mention} has reached the warn limit ({count}/{limit})!\n<b>Action:</b> {s['warn_action'].upper()}"
+        await anim.play(message, text, kind='warn', delay=anim.FAST_DELAY)
         await _apply_warn_action(message, uid, s['warn_action'], mention)
         await reset_warnings(message.chat.id, uid)
     else:
-        await message.answer(f'⚠️ <b>Warning {count}/{limit}</b>\n<b>User:</b> {mention}\n<b>Reason:</b> {reason}')
+        text = f'⚠️ <b>Warning {count}/{limit}</b>\n<b>User:</b> {mention}\n<b>Reason:</b> {reason}'
+        await anim.play(message, text, kind='warn', delay=anim.FAST_DELAY)
+
 
 @router.message(Command('unwarn'), F.chat.type.in_({'group', 'supergroup'}))
-async def cmd_unwarn(message: Message, is_admin: bool=False):
+async def cmd_unwarn(message: Message, is_admin: bool = False):
     if not is_admin:
         await message.answer('❌ <b>Admins only.</b>')
         return
@@ -66,7 +82,8 @@ async def cmd_unwarn(message: Message, is_admin: bool=False):
         await message.answer(f'✅ {mention} has no warnings.')
         return
     remaining = await remove_last_warning(message.chat.id, uid)
-    await message.answer(f'✅ Removed 1 warning from {mention}. Remaining: <b>{remaining}</b>')
+    await anim.play(message, f'✅ Removed 1 warning from {mention}. Remaining: <b>{remaining}</b>', kind='success', delay=anim.FAST_DELAY)
+
 
 @router.message(Command('warns'), F.chat.type.in_({'group', 'supergroup'}))
 async def cmd_warns(message: Message):
@@ -90,8 +107,9 @@ async def cmd_warns(message: Message):
         text += f'{i}. {reason} — <i>{created_at}</i>\n'
     await message.answer(text)
 
+
 @router.message(Command('resetwarns'), F.chat.type.in_({'group', 'supergroup'}))
-async def cmd_resetwarns(message: Message, is_admin: bool=False):
+async def cmd_resetwarns(message: Message, is_admin: bool = False):
     if not is_admin:
         await message.answer('❌ <b>Admins only.</b>')
         return
@@ -100,10 +118,11 @@ async def cmd_resetwarns(message: Message, is_admin: bool=False):
         await message.answer('❌ Reply to a user or mention them.')
         return
     await reset_warnings(message.chat.id, uid)
-    await message.answer(f'✅ All warnings reset for {mention}.')
+    await anim.play(message, f'✅ All warnings reset for {mention}.', kind='success', delay=anim.FAST_DELAY)
+
 
 @router.message(Command('warnlimit'), F.chat.type.in_({'group', 'supergroup'}))
-async def cmd_warnlimit(message: Message, is_admin: bool=False):
+async def cmd_warnlimit(message: Message, is_admin: bool = False):
     if not is_admin:
         await message.answer('❌ <b>Admins only.</b>')
         return
@@ -117,12 +136,13 @@ async def cmd_warnlimit(message: Message, is_admin: bool=False):
         if n < 1 or n > 20:
             raise ValueError
         await update_setting(message.chat.id, 'warn_limit', n)
-        await message.answer(f'✅ Warn limit set to <b>{n}</b>.')
+        await anim.play(message, f'✅ Warn limit set to <b>{n}</b>.', kind='success', delay=anim.FAST_DELAY)
     except ValueError:
         await message.answer('❌ Enter a number between 1 and 20.')
 
+
 @router.message(Command('warnaction'), F.chat.type.in_({'group', 'supergroup'}))
-async def cmd_warnaction(message: Message, is_admin: bool=False):
+async def cmd_warnaction(message: Message, is_admin: bool = False):
     if not is_admin:
         await message.answer('❌ <b>Admins only.</b>')
         return
@@ -136,4 +156,4 @@ async def cmd_warnaction(message: Message, is_admin: bool=False):
         await message.answer('❌ Valid: kick, ban, mute')
         return
     await update_setting(message.chat.id, 'warn_action', action)
-    await message.answer(f'✅ Warn action set to <b>{action.upper()}</b>.')
+    await anim.play(message, f'✅ Warn action set to <b>{action.upper()}</b>.', kind='success', delay=anim.FAST_DELAY)
