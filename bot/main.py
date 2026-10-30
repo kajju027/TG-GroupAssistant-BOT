@@ -1,31 +1,41 @@
 from __future__ import annotations
+
 import asyncio
 import logging
 import sys
+
 from pathlib import Path
+
 if __package__ in {None, ''}:
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.client.session.aiohttp import AiohttpSession
 from aiogram.enums import ParseMode
 from aiogram.exceptions import TelegramConflictError, TelegramNetworkError, TelegramUnauthorizedError
 from aiogram.fsm.storage.memory import MemoryStorage
+
 from bot import database as group_db
 from bot.core import database as core_db
-from bot.core.config import BOT_TOKEN, LOG_LEVEL, OWNER_ID, TG_API_PROXY
+from bot.core.config import ANIMATIONS, BOT_TOKEN, LOG_LEVEL, OWNER_ID, STYLIZE_OUTPUT, TG_API_PROXY
+from bot.core.logger import get_logger, quiet_third_party_loggers
 from bot.handlers import antifake, antilink, antiword, antispam, chat_tracker, download, filters, mute, owner, panel, reactions, settings, start, tag, warn, welcome
 from bot.middlewares.admin_check import AdminCheckMiddleware
 from bot.middlewares.tracking import GroupTrackingMiddleware
+from bot.utils import style
+
 log_level = getattr(logging, LOG_LEVEL, logging.INFO)
 if not isinstance(log_level, int):
     log_level = logging.INFO
 logging.basicConfig(level=log_level, format='%(asctime)s [%(levelname)s] %(name)s: %(message)s')
 _LOG = logging.getLogger('group_assistant_bot')
+_BANNER = get_logger('STARTUP')
+
 
 def build_dispatcher() -> Dispatcher:
     dispatcher = Dispatcher(storage=MemoryStorage())
-    dispatcher.message.middleware(GroupTrackingMiddleware())
+    dispatcher.message.outer_middleware(GroupTrackingMiddleware())
     dispatcher.message.middleware(AdminCheckMiddleware())
     dispatcher.include_router(chat_tracker.router)
     dispatcher.include_router(antifake.router)
@@ -45,11 +55,15 @@ def build_dispatcher() -> Dispatcher:
     dispatcher.include_router(reactions.router)
     return dispatcher
 
+
 async def _main() -> None:
     if not BOT_TOKEN:
         raise RuntimeError('BOT_TOKEN is not set. Copy .env.example to .env and fill it in.')
     if OWNER_ID <= 0:
         raise RuntimeError('OWNER_ID is not set or invalid. It must be your numeric Telegram user ID.')
+    if STYLIZE_OUTPUT:
+        style.patch_outgoing_messages()
+    quiet_third_party_loggers()
     core_db.init()
     await group_db.init_db()
     _LOG.info('Storage initialised.')
@@ -60,7 +74,13 @@ async def _main() -> None:
     try:
         me = await bot.get_me()
         await bot.delete_webhook(drop_pending_updates=False)
-        _LOG.info('@%s online | owner_id=%d | updates=%s', me.username, OWNER_ID, ','.join(allowed_updates))
+        _BANNER.banner([
+            f'🤖  @{me.username} is online',
+            f'👑  Owner ID: {OWNER_ID}',
+            f'🎨  Stylish fonts: {"ON" if STYLIZE_OUTPUT else "OFF"}',
+            f'🎬  Animations: {"ON" if ANIMATIONS else "OFF"}',
+            f'📡  Updates: {", ".join(allowed_updates)}',
+        ])
         await dispatcher.start_polling(bot, allowed_updates=allowed_updates, close_bot_session=False, handle_signals=True)
     except TelegramUnauthorizedError as error:
         _LOG.critical('Bot token was rejected by Telegram: %s', error)
@@ -75,7 +95,10 @@ async def _main() -> None:
         await bot.session.close()
         _LOG.info('Bot stopped.')
 
+
 def main() -> None:
     asyncio.run(_main())
+
+
 if __name__ == '__main__':
     main()
