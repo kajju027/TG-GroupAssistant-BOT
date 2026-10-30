@@ -1,11 +1,16 @@
 from __future__ import annotations
+
 import os
+
 from pathlib import Path
+
 from dotenv import load_dotenv
+
 BASE_DIR = Path(__file__).resolve().parents[2]
 load_dotenv(BASE_DIR / '.env')
 
-def _env_int(name: str, default: int, *, minimum: int | None=None) -> int:
+
+def _env_int(name: str, default: int, *, minimum: int | None = None) -> int:
     raw = os.getenv(name, str(default)).strip()
     try:
         value = int(raw)
@@ -13,9 +18,17 @@ def _env_int(name: str, default: int, *, minimum: int | None=None) -> int:
         return default
     return max(minimum, value) if minimum is not None else value
 
+
+def _env_bool(name: str, default: bool) -> bool:
+    raw = os.getenv(name, str(int(default))).strip().casefold()
+    return raw in {'1', 'true', 'yes', 'on'}
+
+
 def _env_path(name: str, default: str) -> Path:
     value = Path(os.getenv(name, default)).expanduser()
     return value if value.is_absolute() else BASE_DIR / value
+
+
 BOT_TOKEN = os.getenv('BOT_TOKEN', '').strip()
 OWNER_ID = _env_int('OWNER_ID', 0, minimum=0)
 TG_API_PROXY = os.getenv('TG_API_PROXY', '').strip()
@@ -26,6 +39,8 @@ CHATS_DIR = _env_path('CHATS_DIR', 'data/chats')
 LOG_LEVEL = os.getenv('LOG_LEVEL', 'INFO').upper()
 MAX_WARNS = _env_int('MAX_WARNS', 3, minimum=1)
 MAX_DL_MB = _env_int('MAX_DOWNLOAD_MB', 50, minimum=1)
+STYLIZE_OUTPUT = _env_bool('STYLIZE_OUTPUT', True)
+ANIMATIONS = _env_bool('ANIMATIONS', True)
 FIRE_FX = '5104841245755180586'
 CONFETTI_FX = '5046509860389126442'
 HEART_FX = '5159385139981059251'
