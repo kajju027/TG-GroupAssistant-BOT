@@ -1,31 +1,39 @@
+from __future__ import annotations
+
 import asyncio
 import random
-from aiogram import Router, F
-from aiogram.types import Message, ReactionTypeEmoji
-from aiogram.filters import Command
-from aiogram.exceptions import TelegramBadRequest
+
+from aiogram import F, Router
 from aiogram.dispatcher.event.bases import SkipHandler
-from bot.database import get_settings, update_setting, next_reaction_index
-from bot.utils.helpers import is_message_sender_admin
+from aiogram.exceptions import TelegramBadRequest
+from aiogram.filters import Command
+from aiogram.types import Message, ReactionTypeEmoji
+
+from bot.database import get_settings, next_reaction_index, update_setting
 from bot.core.logger import get_logger
+from bot.utils.helpers import is_message_sender_admin
+
 router = Router()
 log = get_logger('REACTIONS')
 MIN_DELAY = 3
 MAX_DELAY = 7
 ALLOWED_EMOJI = {'👍', '👎', '❤', '🔥', '🥰', '👏', '😁', '🤔', '🤯', '😱', '🤬', '😢', '🎉', '🤩', '🤮', '💩', '🙏', '👌', '🕊', '🤡', '🥱', '🥴', '😍', '🐳', '❤\u200d🔥', '🌚', '🌭', '💯', '🤣', '⚡', '🍌', '🏆', '💔', '🤨', '😐', '🍓', '🍾', '💋', '🖕', '😈', '😴', '😭', '🤓', '👻', '👨\u200d💻', '👀', '🎃', '🙈', '😇', '😨', '🤝', '✍', '🤗', '🫡', '🎅', '🎄', '☃', '💅', '🤪', '🗿', '🆒', '💘', '🙉', '🦄', '😘', '💊', '🙊', '😎', '👾', '🤷\u200d♂', '🤷', '🤷\u200d♀', '😡'}
-AUTOMATIC_POOL = ['👍', '🔥', '❤', '🎉', '🤩', '👏', '😁', '🥰', '💯', '⚡']
+AUTOMATIC_POOL = ['👍', '🔥', '❤', '🎉', '🤩', '👏', '😁', '🥰', '💯', '⚡', '🌟', '👀', '😍', '🎊', '🏆', '💫']
+
 
 async def _is_authorized(message: Message) -> bool:
     if message.chat.type == 'channel':
         return True
     return await is_message_sender_admin(message)
 
+
 def _status_text(s: dict) -> str:
     status = '✅ ON' if s.get('reaction_enabled') else '❌ OFF'
     mode = s.get('reaction_mode', 'automatic')
     emojis = s.get('reaction_emojis') or ['👍']
     emoji_line = ' '.join(emojis) if mode == 'custom' else '(auto-picked)'
-    return f'🎭 <b>Auto-Reaction Settings</b>\n\n<b>Status:</b> {status}\n<b>Mode:</b> {mode.upper()}\n<b>Emojis:</b> {emoji_line}\n\nEvery new post gets a reaction a few seconds after it arrives, no matter who posted it.\n\n<b>Usage:</b>\n/reaction on — enable\n/reaction off — disable\n/reaction mode automatic|custom — choose mode\n/reaction emoji [emoji1, emoji2, ...] — set custom emojis\n\nWorks in both groups and channels.'
+    return f'🎭 <b>Auto-Reaction Settings</b>\n\n<b>Status:</b> {status}\n<b>Mode:</b> {mode.upper()}\n<b>Emojis:</b> {emoji_line}\n\nEvery new post gets a <b>big animated reaction</b> a few seconds after it arrives, no matter who posted it.\n\n<b>Usage:</b>\n/reaction on — enable\n/reaction off — disable\n/reaction mode automatic|custom — choose mode\n/reaction emoji [emoji1, emoji2, ...] — set custom emojis\n\nWorks in both groups and channels.'
+
 
 async def _handle_reaction_command(message: Message):
     if not await _is_authorized(message):
@@ -72,13 +80,16 @@ async def _handle_reaction_command(message: Message):
     else:
         await message.answer(_status_text(s))
 
+
 @router.message(Command('reaction'), F.chat.type.in_({'group', 'supergroup'}))
 async def cmd_reaction_group(message: Message):
     await _handle_reaction_command(message)
 
+
 @router.channel_post(Command('reaction'))
 async def cmd_reaction_channel(message: Message):
     await _handle_reaction_command(message)
+
 
 async def _react_after_delay(message: Message):
     try:
@@ -96,11 +107,17 @@ async def _react_after_delay(message: Message):
                 emoji = emojis[idx % len(emojis)]
         else:
             emoji = random.choice(AUTOMATIC_POOL)
-        await message.bot.set_message_reaction(chat_id=message.chat.id, message_id=message.message_id, reaction=[ReactionTypeEmoji(emoji=emoji)])
+        await message.bot.set_message_reaction(
+            chat_id=message.chat.id,
+            message_id=message.message_id,
+            reaction=[ReactionTypeEmoji(emoji=emoji)],
+            is_big=True,
+        )
     except TelegramBadRequest as e:
         log.warn(f'Could not react in {message.chat.id}: {e}')
     except Exception as e:
         log.warn(f'Unexpected error reacting in {message.chat.id}: {e}')
+
 
 @router.message(F.chat.type.in_({'group', 'supergroup'}), ~F.text.startswith('/'))
 async def on_new_group_message(message: Message):
@@ -108,6 +125,7 @@ async def on_new_group_message(message: Message):
     if s.get('reaction_enabled'):
         asyncio.create_task(_react_after_delay(message))
     raise SkipHandler
+
 
 @router.channel_post(~F.text.startswith('/'))
 async def on_new_channel_post(message: Message):
