@@ -174,3 +174,31 @@ async def list_managed_chats(user_id: int) -> list[dict[str, Any]]:
 
 async def note_chat_admin_seen(chat_id: int, chat_title: str, chat_type: str, user_id: int, is_admin: bool, bot_is_admin: bool) -> None:
     await note_admin_seen(chat_id, chat_title, chat_type, user_id, is_admin, bot_is_admin)
+
+async def note_seen_member(chat_id: int, user_id: int, name: str, is_bot: bool = False) -> None:
+    now = datetime.datetime.now(datetime.timezone.utc).isoformat(timespec='seconds')
+
+    def note(data: dict[str, Any]) -> None:
+        members = data.setdefault('members', {})
+        members[str(user_id)] = {'name': str(name)[:128], 'bot': bool(is_bot), 'seen': now}
+        if len(members) > 500:
+            keep = sorted(members.items(), key=lambda item: item[1].get('seen', ''), reverse=True)[:400]
+            data['members'] = dict(keep)
+    await mutate_chat(chat_id, note)
+
+async def remove_seen_member(chat_id: int, user_id: int) -> None:
+    await mutate_chat(chat_id, lambda data: data.get('members', {}).pop(str(user_id), None))
+
+async def get_seen_members(chat_id: int) -> list[dict[str, Any]]:
+    data = await load_chat(chat_id)
+    members = data.get('members', {})
+    result = []
+    for user_id, info in members.items():
+        if info.get('bot'):
+            continue
+        try:
+            result.append({'user_id': int(user_id), 'name': str(info.get('name', '')) or str(user_id), 'seen': info.get('seen', '')})
+        except (TypeError, ValueError):
+            continue
+    result.sort(key=lambda item: item.get('seen', ''), reverse=True)
+    return result
