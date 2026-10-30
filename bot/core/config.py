@@ -32,6 +32,7 @@ def _env_path(name: str, default: str) -> Path:
 BOT_TOKEN = os.getenv('BOT_TOKEN', '').strip()
 OWNER_ID = _env_int('OWNER_ID', 0, minimum=0)
 TG_API_PROXY = os.getenv('TG_API_PROXY', '').strip()
+TG_API_BASE = os.getenv('TG_API_BASE', '').strip().rstrip('/')
 API_BASE_URL = os.getenv('API_BASE_URL', 'https://api.sayan-nexuswork.workers.dev').strip().rstrip('/')
 DATA_DIR = _env_path('DATA_DIR', 'data')
 DATABASE_PATH = _env_path('DATABASE_PATH', 'data/bot.sqlite3')
