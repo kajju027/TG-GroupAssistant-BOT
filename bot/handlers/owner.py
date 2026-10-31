@@ -1,17 +1,27 @@
+from __future__ import annotations
+
 import asyncio
-from aiogram import Router, Bot
+import time
+
+from aiogram import Bot, Router
 from aiogram.enums import ParseMode
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import Message
+
 from bot.core import database as db
+from bot.core.config import START_TIME
+from bot.database import list_broadcast_chats
 from bot.utils.filters import OwnerFilter
-from bot.utils.ui import sc, box, row, sep, bold, mono, italic, link, quote
+from bot.utils.ui import bold, box, fmt_uptime, italic, link, mono, quote, row, sc
+
 router = Router()
+
 
 class BcastState(StatesGroup):
     waiting = State()
+
 
 async def _resolve(message: Message, bot: Bot):
     if message.reply_to_message and message.reply_to_message.from_user:
@@ -36,71 +46,108 @@ async def _resolve(message: Message, bot: Bot):
             return (None, None, None)
     return (None, None, None)
 
+
 @router.message(Command('allow'), OwnerFilter())
 async def allow_user(message: Message, bot: Bot):
     db.inc_stat('commands')
     uid, uname, name = await _resolve(message, bot)
     if not uid:
-        await message.reply(box('Allow User', [f"  {sc('Reply to a user or pass ID / @username')}"]), parse_mode=ParseMode.HTML)
+        await message.reply(box('Allow User 👤', [f"  {sc('Reply to a user or pass ID / @username')}"]))
         return
     if uid == message.from_user.id:
-        await message.reply(box('Allow User', [f"  {sc('You are the owner — no need!')}"]), parse_mode=ParseMode.HTML)
+        await message.reply(box('Allow User 👤', [f"  {sc('You are the owner — no need!')}"]))
         return
     db.add_allowed(uid, uname, name)
-    await message.reply(box('User Allowed ✅', [row('Name', link(name or str(uid), uid), '👤'), row('ID', mono(str(uid)), '🆔'), sep(), quote(sc('Access granted successfully.'))]), parse_mode=ParseMode.HTML)
+    await message.reply(box('User Allowed ✅', [
+        row('Name', link(name or str(uid), uid)),
+        row('Id', mono(str(uid))),
+        '',
+        quote(sc('Access granted successfully.')),
+    ]))
+
 
 @router.message(Command('disallow'), OwnerFilter())
 async def disallow_user(message: Message, bot: Bot):
     db.inc_stat('commands')
     uid, _, name = await _resolve(message, bot)
     if not uid:
-        await message.reply(box('Disallow', [f"  {sc('Reply to a user or pass ID / @username')}"]), parse_mode=ParseMode.HTML)
+        await message.reply(box('Disallow 🚫', [f"  {sc('Reply to a user or pass ID / @username')}"]))
         return
     db.del_allowed(uid)
-    await message.reply(box('Access Revoked 🚫', [row('ID', mono(str(uid)), '🆔'), sep(), quote(sc('User no longer has access.'))]), parse_mode=ParseMode.HTML)
+    await message.reply(box('Access Revoked 🚫', [
+        row('Id', mono(str(uid))),
+        '',
+        quote(sc('User no longer has access.')),
+    ]))
+
 
 @router.message(Command('block'), OwnerFilter())
 async def block_user(message: Message, bot: Bot):
     db.inc_stat('commands')
     uid, _, name = await _resolve(message, bot)
     if not uid:
-        await message.reply(box('Block User', [f"  {sc('Reply to a user or pass ID / @username')}"]), parse_mode=ParseMode.HTML)
+        await message.reply(box('Block User 🔒', [f"  {sc('Reply to a user or pass ID / @username')}"]))
         return
     db.block_user(uid)
     db.del_allowed(uid)
-    await message.reply(box('User Blocked 🔒', [row('ID', mono(str(uid)), '🔒'), row('Name', name or sc('unknown'), '👤'), sep(), quote(sc('User is blocked from this bot.'))]), parse_mode=ParseMode.HTML)
+    await message.reply(box('User Blocked 🔒', [
+        row('Id', mono(str(uid))),
+        row('Name', name or sc('unknown')),
+        '',
+        quote(sc('User is blocked from this bot.')),
+    ]))
+
 
 @router.message(Command('unblock'), OwnerFilter())
 async def unblock_user(message: Message, bot: Bot):
     db.inc_stat('commands')
     uid, _, _ = await _resolve(message, bot)
     if not uid:
-        await message.reply(box('Unblock', [f"  {sc('Reply to a user or pass ID / @username')}"]), parse_mode=ParseMode.HTML)
+        await message.reply(box('Unblock 🔓', [f"  {sc('Reply to a user or pass ID / @username')}"]))
         return
     db.unblock_user(uid)
-    await message.reply(box('User Unblocked 🔓', [row('ID', mono(str(uid)), '🔓'), sep(), quote(sc('User can access the bot again.'))]), parse_mode=ParseMode.HTML)
+    await message.reply(box('User Unblocked 🔓', [
+        row('Id', mono(str(uid))),
+        '',
+        quote(sc('User can access the bot again.')),
+    ]))
+
 
 @router.message(Command('users'), OwnerFilter())
 async def list_users(message: Message):
     db.inc_stat('commands')
     users = db.get_allowed()
     if not users:
-        await message.reply(box('Allowed Users', [f"  {italic(sc('No users allowed yet.'))}"]), parse_mode=ParseMode.HTML)
+        await message.reply(box('Allowed Users 👥', [f"  {italic(sc('No users allowed yet.'))}"]))
         return
-    lines = [row('Total', bold(str(len(users))), '📋'), sep()]
+    lines = [row('Total', bold(str(len(users)))), '']
     for i, u in enumerate(users, 1):
         n = u['first_name'] or sc('unknown')
         uid = u['user_id']
         tag = f"@{u['username']}" if u['username'] else mono(str(uid))
         lines.append(f'  <b>{i}.</b> {link(n, uid)} — {tag}')
-    await message.reply(box('Allowed Users 👥', lines), parse_mode=ParseMode.HTML)
+    await message.reply(box('Allowed Users 👥', lines))
+
 
 @router.message(Command('stats'), OwnerFilter())
 async def show_stats(message: Message):
     db.inc_stat('commands')
-    groups = db.all_groups()
+    chats = await list_broadcast_chats()
+    groups = [c for c in chats if c.get('type') != 'channel']
+    channels = [c for c in chats if c.get('type') == 'channel']
     allowed = db.get_allowed()
-    await message.reply(box('Bot Statistics 📊', [row('Allowed Users', bold(str(len(allowed))), '👤'), row('Groups Active', bold(str(len(groups))), '👥'), row('Messages', bold(str(db.get_stat('messages'))), '💬'), row('Reactions', bold(str(db.get_stat('reactions'))), '⚡'), row('Downloads', bold(str(db.get_stat('downloads'))), '⬇️'), row('Commands', bold(str(db.get_stat('commands'))), '📊')]), parse_mode=ParseMode.HTML)
+    stats = db.get_all_stats()
+    await message.reply(box('Bot Statistics 📊', [
+        row('Uptime', bold(fmt_uptime(time.time() - START_TIME))),
+        row('Groups', bold(str(len(groups)))),
+        row('Channels', bold(str(len(channels)))),
+        row('Allowed Users', bold(str(len(allowed)))),
+        row('Messages', bold(str(stats.get('messages', 0)))),
+        row('Reactions', bold(str(stats.get('reactions', 0)))),
+        row('Commands', bold(str(stats.get('commands', 0)))),
+        row('Downloads', bold(str(stats.get('downloads', 0)))),
+    ]))
+
 
 @router.message(Command('broadcast'), OwnerFilter())
 async def start_broadcast(message: Message, state: FSMContext, bot: Bot):
@@ -109,24 +156,32 @@ async def start_broadcast(message: Message, state: FSMContext, bot: Bot):
     if len(parts) > 1:
         await _do_broadcast(message, parts[1], bot)
         return
-    await message.reply(box('Broadcast 📢', [f"  {sc('Send the message to broadcast:')} ⬇️"]), parse_mode=ParseMode.HTML)
+    await message.reply(box('Broadcast 📢', [f"  {sc('Send the message to broadcast:')} ⬇️"]))
     await state.set_state(BcastState.waiting)
+
 
 @router.message(BcastState.waiting, OwnerFilter())
 async def recv_broadcast(message: Message, state: FSMContext, bot: Bot):
     await state.clear()
     await _do_broadcast(message, message.html_text or '', bot)
 
+
 async def _do_broadcast(message: Message, text: str, bot: Bot):
-    groups = db.all_groups()
+    chats = await list_broadcast_chats()
     sent = 0
     failed = 0
-    status = await message.reply(box('Broadcasting 📢', [f"  ⏳ {sc('Sending to')} {bold(str(len(groups)))} {sc('groups...')}"]), parse_mode=ParseMode.HTML)
-    for g in groups:
+    status = await message.reply(box('Broadcasting 📢', [
+        f"  ⏳ {sc('Sending to')} {bold(str(len(chats)))} {sc('chats...')}"]))
+    for chat in chats:
         try:
-            await bot.send_message(g['chat_id'], text, parse_mode=ParseMode.HTML)
+            await bot.send_message(chat['chat_id'], text, parse_mode=ParseMode.HTML)
             sent += 1
         except Exception:
             failed += 1
         await asyncio.sleep(0.05)
-    await status.edit_text(box('Broadcast Complete ✅', [row('Sent', bold(str(sent)), '✅'), row('Failed', bold(str(failed)), '❌'), sep(), quote(sc('Broadcast finished.'))]), parse_mode=ParseMode.HTML)
+    await status.edit_text(box('Broadcast Complete ✅', [
+        row('Sent', bold(str(sent))),
+        row('Failed', bold(str(failed))),
+        '',
+        quote(sc('Broadcast finished.')),
+    ]))
