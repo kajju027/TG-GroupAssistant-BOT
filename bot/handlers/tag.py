@@ -16,9 +16,9 @@ from bot.utils.ui import bold, box, italic, mono, progress_bar, quote, row, sc, 
 router = Router()
 
 _GROUP_TYPES = {'group', 'supergroup'}
-CHUNK_SIZE = 25
-MAX_CHUNKS = 8
-CHUNK_DELAY = 0.5
+# Telegram hard limit is 4096 characters per message; stay safely below it.
+CHUNK_TEXT_LIMIT = 3200
+CHUNK_DELAY = 0.6
 
 
 def _split_command(message: Message) -> tuple[str, str]:
@@ -43,6 +43,9 @@ async def _admin_targets(message: Message):
 
 
 async def _all_targets(message: Message):
+    """Every human the bot knows in this chat: current admins plus every
+    member it has seen talking or joining. Telegram does not let bots list
+    all members of a group, so this is the widest possible tag list."""
     admins, error = await _admin_targets(message)
     if admins is None:
         return None, error
@@ -56,9 +59,42 @@ async def _all_targets(message: Message):
     return users, ''
 
 
-def _chunks(items: list):
-    chunks = [items[i:i + CHUNK_SIZE] for i in range(0, len(items), CHUNK_SIZE)]
-    return chunks[:MAX_CHUNKS], len(chunks)
+def _mention_chunks(targets) -> list[str]:
+    """Pack every mention into as few messages as possible.
+
+    All tagged names live together inside one pointing-finger block, e.g.
+        🫵 Name1 • Name2 • Name3 ...
+    instead of one line per member.
+    """
+    chunks: list[str] = []
+    current = '🫵 '
+    for uid, name in targets:
+        mention = mention_by_name(uid, name)
+        addition = mention if current.endswith(' ') else f' • {mention}'
+        if len(current) + len(addition) > CHUNK_TEXT_LIMIT:
+            chunks.append(current)
+            current = f'🫵 {mention}'
+        else:
+            current += addition
+    if current.strip():
+        chunks.append(current)
+    return chunks
+
+
+def _header(chat_title: str, count: int, total_members: int, custom_msg: str, progress: tuple[int, int] | None = None) -> str:
+    lines = [
+        row('Group', bold(escape(chat_title)[:40])),
+        row('Tagging', bold(f'{count}' + (f' / {total_members}' if total_members else '')) + ' members'),
+    ]
+    if progress is not None:
+        done, total = progress
+        lines.append(row('Progress', mono(progress_bar(done, total))))
+    lines.append(sep())
+    if custom_msg:
+        lines.append(quote(escape(custom_msg)))
+    else:
+        lines.append(f'{italic(sc("Attention everyone!"))}')
+    return box('Tagging Everyone', lines, icon='📣')
 
 
 async def _tag_everyone(message: Message, custom_msg: str, targets) -> None:
@@ -68,92 +104,49 @@ async def _tag_everyone(message: Message, custom_msg: str, targets) -> None:
         total_members = int(await message.bot.get_chat_member_count(message.chat.id))
     except Exception:
         pass
-    chunks, total_chunks = _chunks(targets)
+    chunks = _mention_chunks(targets)
     note = ''
     if total_members and len(targets) < total_members:
-        note = f"\n  ℹ️ {italic(sc(f'I can only tag members I have seen here ({len(targets)}/{total_members})'))}"
-    header = box('Tagging Everyone', [
-        row('Group', bold(escape(chat_title)[:40]), '👥'),
-        row('Members', bold(f'{len(targets)}' + (f' / {total_members}' if total_members else '')), '📣'),
-        row('Progress', mono(progress_bar(0, len(chunks))), '⏳'),
-        sep(),
-        (f"  💬 {quote(escape(custom_msg))}" if custom_msg else f"  💬 {italic(sc('Attention everyone!'))}"),
-        note,
-    ])
-    header_msg = await anim.play_in_chat(
-        message.bot, message.chat.id, header, kind='tag', parse_mode='HTML'
-    )
-    sent_count = 0
+        note = f"\n{italic(sc(f'I tag everyone I have seen here ({len(targets)}/{total_members}). New faces join the list once they talk.'))}"
+    header = _header(chat_title, len(targets), total_members, custom_msg, (0, len(chunks)))
+    header_msg = await anim.play_in_chat(message.bot, message.chat.id, header + note, kind='tag', parse_mode='HTML')
+    sent = 0
     for index, chunk in enumerate(chunks, 1):
-        lines = [f'➤ {mention_by_name(uid, name)}' for uid, name in chunk]
         try:
-            await message.bot.send_message(message.chat.id, '\n'.join(lines))
-            sent_count += len(chunk)
+            await message.bot.send_message(message.chat.id, chunk, parse_mode='HTML')
+            sent += 1
         except Exception:
             pass
-        if header_msg is not None:
-            progress_text = box('Tagging Everyone', [
-                row('Group', bold(escape(chat_title)[:40]), '👥'),
-                row('Members', bold(f'{len(targets)}' + (f' / {total_members}' if total_members else '')), '📣'),
-                row('Progress', mono(progress_bar(index, len(chunks))), '⏳'),
-                sep(),
-                (f"  💬 {quote(escape(custom_msg))}" if custom_msg else f"  💬 {italic(sc('Attention everyone!'))}"),
-                note,
-            ])
-            await anim.edit_safe(header_msg, progress_text, parse_mode='HTML')
+        if header_msg is not None and len(chunks) > 1:
+            await anim.edit_safe(header_msg, _header(chat_title, len(targets), total_members, custom_msg, (index, len(chunks))) + note, parse_mode='HTML')
         if index < len(chunks):
             await asyncio.sleep(CHUNK_DELAY)
     done = box('Everyone Tagged', [
-        row('Tagged', bold(str(sent_count)), '👥'),
-        row('Messages', bold(str(len(chunks))), '📨'),
+        row('Tagged', bold(str(len(targets))) + ' members'),
+        row('Messages', bold(str(sent))),
         sep(),
         quote(sc('Everyone has been notified.')),
-    ])
+    ], icon='📣')
     if header_msg is not None:
         await anim.edit_safe(header_msg, done, parse_mode='HTML')
 
 
 async def _tag_admins(message: Message, custom_msg: str, targets) -> None:
     items = [(user.id, user.full_name) for user in targets]
-    message_line = f"  💬 {quote(escape(custom_msg))}" if custom_msg else f"  💬 {italic(sc('Attention admins!'))}"
-    if len(items) <= 20:
-        lines = [f'➤ {mention_by_name(uid, name)}' for uid, name in items]
-        text = box('Admin Tag', [
-            row('Admins', bold(str(len(items))), '👑'),
-            sep(),
-            message_line,
-            sep(),
-            *lines,
-        ])
-        await anim.play(message, text, kind='tag', parse_mode='HTML')
-        return
-    chunks, _ = _chunks(items)
+    chunks = _mention_chunks(items)
+    message_line = quote(escape(custom_msg)) if custom_msg else italic(sc('Attention admins!'))
     header = box('Admin Tag', [
-        row('Admins', bold(str(len(items))), '👑'),
-        row('Progress', mono(progress_bar(0, len(chunks))), '⏳'),
+        row('Admins', bold(str(len(items)))),
         sep(),
         message_line,
-    ])
+    ], icon='👑')
     header_msg = await anim.play(message, header, kind='tag', parse_mode='HTML')
-    for index, chunk in enumerate(chunks, 1):
-        lines = [f'➤ {mention_by_name(uid, name)}' for uid, name in chunk]
+    for chunk in chunks:
         try:
-            await message.bot.send_message(message.chat.id, '\n'.join(lines))
+            await message.bot.send_message(message.chat.id, chunk, parse_mode='HTML')
         except Exception:
             pass
-        if header_msg is not None:
-            await anim.edit_safe(
-                header_msg,
-                box('Admin Tag', [
-                    row('Admins', bold(str(len(items))), '👑'),
-                    row('Progress', mono(progress_bar(index, len(chunks))), '⏳'),
-                    sep(),
-                    message_line,
-                ]),
-                parse_mode='HTML',
-            )
-        if index < len(chunks):
-            await asyncio.sleep(CHUNK_DELAY)
+        await asyncio.sleep(CHUNK_DELAY)
 
 
 @router.message(Command('tag'), F.chat.type.in_(_GROUP_TYPES))
