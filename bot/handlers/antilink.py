@@ -1,13 +1,45 @@
+from __future__ import annotations
+
 import re
-from aiogram import Router, F
-from aiogram.types import Message
-from aiogram.filters import Command
+
+from aiogram import F, Router
 from aiogram.dispatcher.event.bases import SkipHandler
-from bot.database import get_settings, update_setting, add_whitelist_link, remove_whitelist_link, get_whitelisted_links, add_warning
-from bot.utils.helpers import is_admin as check_is_admin, mention_by_name, is_domain_whitelisted, extract_domain
+from aiogram.enums import MessageEntityType
+from aiogram.filters import Command
+from aiogram.types import Message
+
+from bot.database import add_warning, get_settings
 from bot.utils.autodelete import answer_and_autodelete
+from bot.utils.helpers import (
+    is_admin as check_is_admin,
+    is_domain_whitelisted,
+    mention_by_name,
+)
+from bot.utils.ui import box, kb, quote, sc, ubtn
+from bot.utils.helpers import get_bot_username
+
 router = Router()
-LINK_RE = re.compile('(https?://[^\\s]+|t\\.me/[^\\s]+|telegram\\.me/[^\\s]+)', re.IGNORECASE)
+
+LINK_RE = re.compile('(https?://[^\\s]+|www\\.[^\\s]+|t\\.me/[^\\s]+|telegram\\.me/[^\\s]+|telegram\\.dog/[^\\s]+)', re.IGNORECASE)
+
+
+def collect_links(message: Message) -> list[str]:
+    """Links from entities (including hidden text_link URLs), text and caption."""
+    links: list[str] = []
+    for entity in list(message.entities or []) + list(message.caption_entities or []):
+        if entity.type in {MessageEntityType.URL, MessageEntityType.TEXT_LINK}:
+            value = getattr(entity, 'url', None) or ''
+            offset, length = entity.offset, entity.length
+            source = message.text or message.caption or ''
+            if not value and source:
+                value = source[offset:offset + length]
+            if value:
+                links.append(value)
+    text = message.text or message.caption or ''
+    links.extend(LINK_RE.findall(text))
+    # bare @usernames are not links — drop them
+    return [link for link in links if not link.startswith('@')]
+
 
 async def _apply_action(message: Message, action: str):
     uid = message.from_user.id
@@ -20,85 +52,60 @@ async def _apply_action(message: Message, action: str):
         s = await get_settings(message.chat.id)
         count = await add_warning(message.chat.id, uid, 'Sent a link')
         if count >= s['warn_limit']:
-            await answer_and_autodelete(message, f'⚠️ {mention} has been kicked for exceeding the warn limit.')
+            await answer_and_autodelete(message, f'⚠️ {mention} {sc("kicked — warn limit reached.")}')
             try:
                 await message.bot.ban_chat_member(message.chat.id, uid)
                 await message.bot.unban_chat_member(message.chat.id, uid)
             except Exception:
                 pass
         else:
-            await answer_and_autodelete(message, f"🔗 <b>Link removed.</b>\n⚠️ {mention} has been warned ({count}/{s['warn_limit']})\n<b>Reason:</b> Sent a link")
+            await answer_and_autodelete(message, f"🔗 {sc('Link removed.')}\n⚠️ {mention} {sc('warned')} ({count}/{s['warn_limit']})")
     elif action == 'kick':
-        await answer_and_autodelete(message, f'🚪 {mention} was kicked for sending a link.')
+        await answer_and_autodelete(message, f'🚪 {mention} {sc("was kicked for sending a link.")}')
         try:
             await message.bot.ban_chat_member(message.chat.id, uid)
             await message.bot.unban_chat_member(message.chat.id, uid)
         except Exception:
             pass
     elif action == 'ban':
-        await answer_and_autodelete(message, f'🔨 {mention} was banned for sending a link.')
+        await answer_and_autodelete(message, f'🔨 {mention} {sc("was banned for sending a link.")}')
         try:
             await message.bot.ban_chat_member(message.chat.id, uid)
         except Exception:
             pass
     else:
-        await answer_and_autodelete(message, f'🔗 <b>Link removed</b> from {mention}.')
+        await answer_and_autodelete(message, f"🔗 {sc('Link removed')} — {mention}.")
+
 
 @router.message(Command('antilink'), F.chat.type.in_({'group', 'supergroup'}))
-async def cmd_antilink(message: Message, is_admin: bool=False):
+async def cmd_antilink(message: Message, is_admin: bool = False):
     if not is_admin:
-        await message.answer('❌ <b>Admins only.</b>')
+        await message.answer(f"❌ <b>{sc('Admins only.')}</b>")
         return
-    parts = message.text.split()
-    if len(parts) < 2:
-        s = await get_settings(message.chat.id)
-        status = '✅ ON' if s['antilink'] else '❌ OFF'
-        await message.answer(f"🔗 <b>Anti-Link:</b> {status}\n<b>Action:</b> {s['antilink_action'].upper()}\n\n<b>Usage:</b>\n/antilink on|off\n/antilink action [delete/warn/kick/ban]\n/antilink allow [domain]\n/antilink disallow [domain]\n/antilink domains")
-        return
-    cmd = parts[1].lower()
-    if cmd == 'on':
-        await update_setting(message.chat.id, 'antilink', True)
-        await message.answer('✅ <b>Anti-Link enabled.</b>')
-    elif cmd == 'off':
-        await update_setting(message.chat.id, 'antilink', False)
-        await message.answer('❌ <b>Anti-Link disabled.</b>')
-    elif cmd in ('allow', 'whitelist', 'wl') and len(parts) > 2:
-        domain = extract_domain(parts[2])
-        await add_whitelist_link(message.chat.id, domain)
-        await message.answer(f'✅ Links from <code>{domain}</code> will no longer be removed.')
-    elif cmd in ('disallow', 'unwhitelist', 'unwl') and len(parts) > 2:
-        domain = extract_domain(parts[2])
-        await remove_whitelist_link(message.chat.id, domain)
-        await message.answer(f'✅ Removed <code>{domain}</code> from the allowed list.')
-    elif cmd in ('domains', 'allowed'):
-        whitelist = await get_whitelisted_links(message.chat.id)
-        text = '\n'.join((f'• <code>{d}</code>' for d in whitelist)) or 'No allowed domains set.'
-        await message.answer(f'🌐 <b>Allowed Domains</b>\n\n{text}')
-    elif cmd == 'action' and len(parts) > 2:
-        action = parts[2].lower()
-        if action not in ('delete', 'warn', 'kick', 'ban'):
-            await message.answer('❌ Valid actions: delete, warn, kick, ban')
-            return
-        await update_setting(message.chat.id, 'antilink_action', action)
-        await message.answer(f'✅ Anti-Link action set to <b>{action.upper()}</b>.')
-    else:
-        await message.answer('<b>Usage:</b>\n/antilink on|off\n/antilink action [delete/warn/kick/ban]\n/antilink allow [domain]\n/antilink disallow [domain]\n/antilink domains')
+    username = await get_bot_username(message.bot)
+    markup = kb([ubtn('⚙️ Open Settings', f'https://t.me/{username}?start=cfg{message.chat.id}')]) if username else None
+    await message.answer(box('Anti Link 🔗', [quote(sc('Anti-Link settings now live in my private chat — tap below.'))]), reply_markup=markup)
 
-@router.message(F.chat.type.in_({'group', 'supergroup'}), F.text, ~F.text.startswith('/'))
+
+@router.message(F.chat.type.in_({'group', 'supergroup'}), F.text | F.caption)
 async def check_links(message: Message):
     if not message.from_user:
         raise SkipHandler
+    if message.text and message.text.startswith('/'):
+        raise SkipHandler
     if await check_is_admin(message.bot, message.chat.id, message.from_user.id):
         raise SkipHandler
-    settings = await get_settings(message.chat.id)
-    if not settings['antilink']:
+    if message.sender_chat is not None:
         raise SkipHandler
-    links = LINK_RE.findall(message.text or '')
+    settings = await get_settings(message.chat.id)
+    if not settings.get('antilink'):
+        raise SkipHandler
+    links = collect_links(message)
     if not links:
         raise SkipHandler
     whitelist = settings.get('antilink_whitelist', [])
     for link in links:
         if not is_domain_whitelisted(link, whitelist):
-            await _apply_action(message, settings['antilink_action'])
+            await _apply_action(message, settings.get('antilink_action', 'delete'))
             return
     raise SkipHandler
