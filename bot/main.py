@@ -25,6 +25,7 @@ from bot.handlers import (
     antilink,
     antiword,
     antispam,
+    autodelete as autodelete_handler,
     channel_guard,
     chat_tracker,
     download,
@@ -33,6 +34,7 @@ from bot.handlers import (
     owner,
     panel,
     reactions,
+    react as legacy_react,
     settings,
     start,
     tag,
@@ -133,7 +135,13 @@ def build_dispatcher() -> Dispatcher:
     dispatcher.include_router(antispam.router)
     dispatcher.include_router(filters.router)
     dispatcher.include_router(download.router)
+    # Auto-purge (24h sweep) — must come BEFORE reactions so the /purge24h
+    # command is reachable even when reactions are on.
+    dispatcher.include_router(autodelete_handler.router)
+    # Modern super-reactions engine first; legacy /react + /setreact only
+    # fires when the modern engine is OFF for that chat.
     dispatcher.include_router(reactions.router)
+    dispatcher.include_router(legacy_react.router)
     dispatcher.include_router(channel_guard.router)
 
     @dispatcher.errors()
@@ -189,6 +197,8 @@ async def _main() -> None:
     dispatcher = build_dispatcher()
     allowed_updates = dispatcher.resolve_used_update_types()
     stats_task = asyncio.create_task(core_db.stats_flush_loop())
+    from bot.handlers.autodelete import autodelete_loop
+    purge_task = asyncio.create_task(autodelete_loop(bot))
     try:
         me = await connect(bot, using_proxy)
         await bot.delete_webhook(drop_pending_updates=True)
@@ -215,6 +225,7 @@ async def _main() -> None:
         raise
     finally:
         stats_task.cancel()
+        purge_task.cancel()
         try:
             core_db.flush_stats()
         except Exception:
