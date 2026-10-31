@@ -46,13 +46,23 @@ _DEFAULT_SETTINGS: dict[str, Any] = {
     'warn_action': 'kick',              # kick | ban | mute
     # 🛡️ channel anti-tag guard
     'antitag': False,
+    # 🧹 group auto-purge (default OFF). When enabled, every message older
+    # than the configured window is deleted on a slow background sweep.
+    'autodelete': False,
+    'autodelete_window': 24,           # hours (1-168 / 7 days max)
+    'autodelete_last_id': 0,           # cursor — keeps sweeps incremental
+    'autodelete_running': False,      # lock flag so concurrent sweeps skip
+    # 🎭 legacy /react + /setreact (kept for backwards compat). Default OFF.
+    # When the modern Super Reactions engine is on, this stands down.
+    'legacy_react_enabled': False,
+    'legacy_react_emoji': '🔥',
     # bookkeeping (filled by the trackers)
     'admins_cache': [],
     'bot_is_admin': False,
 }
 
 # Keys that never travel through the hot read path.
-_HOT_KEYS = {'warnings', 'members'}
+_HOT_KEYS = {'warnings', 'members', 'autodelete_last_id', 'autodelete_running'}
 
 # Old builds shipped welcome/goodbye ON with these template texts. On
 # migration they are reset to OFF + empty so nothing shouts on its own.
