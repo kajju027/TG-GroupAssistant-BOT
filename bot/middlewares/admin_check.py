@@ -1,13 +1,21 @@
 from __future__ import annotations
+
 import time
+
 from typing import Any, Awaitable, Callable
+
 from aiogram import BaseMiddleware
 from aiogram.enums import ChatMemberStatus
 from aiogram.types import Message
+
 from bot.database import note_chat_admin_seen
-_CACHE_SECONDS = 60
+
+_CACHE_SECONDS = 120.0
+_INDEX_TTL = 900.0
 _admin_cache: dict[tuple[int, int], tuple[float, bool]] = {}
 _bot_admin_cache: dict[int, tuple[float, bool]] = {}
+_index_touch: dict[tuple[int, int], float] = {}
+
 
 def _fresh(cache: dict, key: Any) -> bool | None:
     item = cache.get(key)
@@ -15,7 +23,10 @@ def _fresh(cache: dict, key: Any) -> bool | None:
         return item[1]
     return None
 
+
 class AdminCheckMiddleware(BaseMiddleware):
+    """Injects `is_admin` into message handlers, with caching so the hot
+    path never waits on an extra Telegram call."""
 
     async def __call__(self, handler: Callable[[Message, dict[str, Any]], Awaitable[Any]], event: Message, data: dict[str, Any]) -> Any:
         if event.chat.type not in {'group', 'supergroup'}:
@@ -37,14 +48,21 @@ class AdminCheckMiddleware(BaseMiddleware):
         data['is_admin'] = is_admin
         data['is_creator'] = is_admin
         if actor_id is not None and is_admin:
-            cached_bot_admin = _fresh(_bot_admin_cache, event.chat.id)
-            if cached_bot_admin is None:
+            now = time.monotonic()
+            key = (event.chat.id, actor_id)
+            if now - _index_touch.get(key, 0.0) > _INDEX_TTL:
+                _index_touch[key] = now
                 try:
-                    me = await event.bot.get_me()
-                    bot_member = await event.bot.get_chat_member(event.chat.id, me.id)
-                    cached_bot_admin = bot_member.status in {ChatMemberStatus.ADMINISTRATOR, ChatMemberStatus.CREATOR}
+                    bot_admin = _fresh(_bot_admin_cache, event.chat.id)
+                    if bot_admin is None:
+                        try:
+                            me = await event.bot.get_me()
+                            member = await event.bot.get_chat_member(event.chat.id, me.id)
+                            bot_admin = member.status in {ChatMemberStatus.ADMINISTRATOR, ChatMemberStatus.CREATOR}
+                        except Exception:
+                            bot_admin = False
+                        _bot_admin_cache[event.chat.id] = (time.monotonic(), bot_admin)
+                    await note_chat_admin_seen(event.chat.id, event.chat.title or 'Untitled', event.chat.type, actor_id, True, bot_admin)
                 except Exception:
-                    cached_bot_admin = False
-                _bot_admin_cache[event.chat.id] = (time.monotonic(), cached_bot_admin)
-            await note_chat_admin_seen(event.chat.id, event.chat.title or 'Untitled', event.chat.type, actor_id, True, cached_bot_admin)
+                    pass
         return await handler(event, data)
