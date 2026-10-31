@@ -40,28 +40,45 @@ def _emit(level: str, tag: str, message: str):
     print(f'{ts} {lvl} {tagged} {message}')
     sys.stdout.flush()
 
+def _format(message: str, args: tuple) -> str:
+    """Support both plain messages and lazy %-style logging arguments.
+
+    Mirrors the standard logging call signature log.info('%s done', name),
+    so call sites written for logging.Logger keep working here.
+    """
+    if not args:
+        return str(message)
+    try:
+        return str(message) % args
+    except (TypeError, ValueError):
+        return str(message)
+
 class BotLogger:
 
     def __init__(self, tag: str='BOT'):
         self.tag = tag
 
-    def debug(self, message: str):
-        _emit('DEBUG', self.tag, message)
+    def debug(self, message: str, *args):
+        _emit('DEBUG', self.tag, _format(message, args))
 
-    def info(self, message: str):
-        _emit('INFO', self.tag, message)
+    def info(self, message: str, *args):
+        _emit('INFO', self.tag, _format(message, args))
 
-    def success(self, message: str):
-        _emit('SUCCESS', self.tag, message)
+    def success(self, message: str, *args):
+        _emit('SUCCESS', self.tag, _format(message, args))
 
-    def warn(self, message: str):
-        _emit('WARNING', self.tag, message)
+    def warn(self, message: str, *args):
+        _emit('WARNING', self.tag, _format(message, args))
 
-    def error(self, message: str):
-        _emit('ERROR', self.tag, message)
+    # Standard-logging alias: logging.Logger names this level "warning".
+    def warning(self, message: str, *args):
+        _emit('WARNING', self.tag, _format(message, args))
 
-    def critical(self, message: str):
-        _emit('CRITICAL', self.tag, message)
+    def error(self, message: str, *args):
+        _emit('ERROR', self.tag, _format(message, args))
+
+    def critical(self, message: str, *args):
+        _emit('CRITICAL', self.tag, _format(message, args))
 
     def banner(self, lines):
         width = max((len(_strip_ansi(line)) for line in lines)) + 4
