@@ -32,6 +32,7 @@ WARN_ACTIONS = ['kick', 'ban', 'mute']
 SPAM_LIMITS = [3, 5, 7, 10, 15, 20]
 SPAM_WINDOWS = [5, 10, 15, 30, 60]
 WARN_LIMITS = [2, 3, 5, 7, 10]
+AUTOPURGE_WINDOWS = [1, 6, 12, 24, 48, 72, 168]  # hours
 
 EMOJI_PER_PAGE = 20
 KEYWORD_MAX = 24  # keeps callback data safely under Telegram's 64 bytes
@@ -100,7 +101,8 @@ async def render_chat_panel(chat_id: int) -> tuple[str, InlineKeyboardMarkup]:
              btn(f"🔤 Anti Word {dot(bool(s.get('antiword')))}", f'pv:aw:{chat_id}')],
             [btn(f"🚫 Anti Spam {dot(bool(s.get('antispam')))}", f'pv:as:{chat_id}'),
              btn(f"⚠️ Warns {dot(True)}", f'pv:wn:{chat_id}')],
-            [btn(f"🔎 Filters ({filters_count})", f'pv:fl:{chat_id}')],
+            [btn(f"🔎 Filters ({filters_count})", f'pv:fl:{chat_id}'),
+             btn(f"🧹 Auto Purge {dot(bool(s.get('autodelete')))}", f'pv:ap:{chat_id}')],
             [btn('♻️ Reset Settings', f'rst:{chat_id}')],
             [btn('🔙 Chats', 'panel:list'), btn('❌ Close', 'close')],
         ]
@@ -134,6 +136,8 @@ async def _rerender(callback: CallbackQuery, data: str) -> None:
         await pv_filters(cb2)
     elif route == 'cg':
         await pv_guard(cb2)
+    elif route == 'ap':
+        await pv_autopurge(cb2)
 
 
 # -------------------------------------------------------- panel routers ---
@@ -602,6 +606,36 @@ async def pv_guard(callback: CallbackQuery, state: FSMContext | None = None):
         await safe_edit(callback.message, text, markup)
 
 
+# ----------------------------------------------------------- auto-purge ---
+@router.callback_query(F.data.startswith('pv:ap:'))
+async def pv_autopurge(callback: CallbackQuery, state: FSMContext | None = None):
+    if state is not None:
+        await state.clear()
+    try:
+        chat_id = int(callback.data.split(':')[2])
+    except (AttributeError, ValueError):
+        await callback.answer('Invalid request.', show_alert=True)
+        return
+    if not await _check_access(callback, chat_id):
+        return
+    await callback.answer()
+    s = await get_settings(chat_id)
+    window = int(s.get('autodelete_window') or 24)
+    text = box('Auto Purge 🧹', [
+        row('Status', f"{dot(bool(s.get('autodelete')))} <b>{sc('On') if s.get('autodelete') else sc('Off')}</b>"),
+        row('Window', bold(f"{window} {sc('hours')}")),
+        '',
+        quote(sc('When ON, the bot slowly sweeps this group every few minutes and deletes any message older than the window. Channels are never touched. The /purgeall command still works on demand regardless of this setting.')),
+    ])
+    markup = kb(
+        [tbtn('Auto Purge', bool(s.get('autodelete')), f'tgl:ap:{chat_id}')],
+        [btn('⏱️ Window', f'cyc:ap_window:{chat_id}')],
+        _panel_back_kb(chat_id),
+    )
+    if callback.message is not None:
+        await safe_edit(callback.message, text, markup)
+
+
 # ---------------------------------------------------------------- reset ---
 @router.callback_query(F.data.startswith('rst:'))
 async def reset_settings_flow(callback: CallbackQuery, state: FSMContext | None = None):
@@ -651,6 +685,7 @@ TOGGLE_KEYS = {
     'aw': ('antiword', 'aw'),
     'as': ('antispam', 'as'),
     'cg': ('antitag', 'cg'),
+    'ap': ('autodelete', 'ap'),
 }
 
 
@@ -692,6 +727,7 @@ CYCLE_MAP = {
     'as_window': ('antispam_window', SPAM_WINDOWS, 'as'),
     'wn_limit': ('warn_limit', WARN_LIMITS, 'wn'),
     'wn_action': ('warn_action', WARN_ACTIONS, 'wn'),
+    'ap_window': ('autodelete_window', AUTOPURGE_WINDOWS, 'ap'),
 }
 
 
