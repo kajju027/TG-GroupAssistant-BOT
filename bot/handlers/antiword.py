@@ -1,102 +1,98 @@
-from aiogram import Router, F
-from aiogram.types import Message
-from aiogram.filters import Command
+from __future__ import annotations
+
+import re
+
+from aiogram import F, Router
 from aiogram.dispatcher.event.bases import SkipHandler
-from bot.database import get_settings, update_setting, get_banned_words, add_banned_word, remove_banned_word, add_warning
-from bot.utils.helpers import is_admin as check_is_admin, mention_by_name
+from aiogram.filters import Command
+from aiogram.types import Message
+
+from bot.database import add_warning, get_banned_words, get_settings
 from bot.utils.autodelete import answer_and_autodelete
+from bot.utils.helpers import get_bot_username, is_admin as check_is_admin, mention_by_name
+from bot.utils.ui import box, kb, quote, sc, ubtn
+
 router = Router()
 
-@router.message(Command('antiword'), F.chat.type.in_({'group', 'supergroup'}))
-async def cmd_antiword(message: Message, is_admin: bool=False):
-    if not is_admin:
-        await message.answer('❌ <b>Admins only.</b>')
-        return
-    parts = message.text.split(maxsplit=2)
-    if len(parts) < 2:
-        s = await get_settings(message.chat.id)
-        status = '✅ ON' if s['antiword'] else '❌ OFF'
-        words = await get_banned_words(message.chat.id)
-        await message.answer(f"🔤 <b>Anti-Word:</b> {status}\n<b>Action:</b> {s['antiword_action'].upper()}\n<b>Words:</b> {(', '.join(words) if words else 'None')}\n\n<b>Usage:</b> /antiword on|off|add|remove|list|action [word]")
-        return
-    cmd = parts[1].lower()
-    if cmd == 'on':
-        await update_setting(message.chat.id, 'antiword', True)
-        await message.answer('✅ <b>Anti-Word enabled.</b>')
-    elif cmd == 'off':
-        await update_setting(message.chat.id, 'antiword', False)
-        await message.answer('❌ <b>Anti-Word disabled.</b>')
-    elif cmd == 'add' and len(parts) > 2:
-        word = parts[2].strip().lower()
-        await add_banned_word(message.chat.id, word)
-        await message.answer(f'✅ Added banned word: <code>{word}</code>')
-    elif cmd == 'remove' and len(parts) > 2:
-        word = parts[2].strip().lower()
-        await remove_banned_word(message.chat.id, word)
-        await message.answer(f'✅ Removed banned word: <code>{word}</code>')
-    elif cmd == 'list':
-        words = await get_banned_words(message.chat.id)
-        if words:
-            await message.answer('🔤 <b>Banned words:</b>\n' + '\n'.join((f'• <code>{w}</code>' for w in words)))
-        else:
-            await message.answer('No banned words set.')
-    elif cmd == 'action' and len(parts) > 2:
-        action = parts[2].lower()
-        if action not in ('delete', 'warn', 'kick', 'ban'):
-            await message.answer('❌ Valid actions: delete, warn, kick, ban')
-            return
-        await update_setting(message.chat.id, 'antiword_action', action)
-        await message.answer(f'✅ Anti-Word action set to <b>{action.upper()}</b>.')
-    else:
-        await message.answer('<b>Usage:</b> /antiword on|off|add [word]|remove [word]|list|action [delete/warn/kick/ban]')
+_pattern_cache: dict[str, re.Pattern] = {}
 
-@router.message(F.chat.type.in_({'group', 'supergroup'}), F.text, ~F.text.startswith('/'))
+
+def _compile(word: str) -> re.Pattern:
+    pattern = _pattern_cache.get(word)
+    if pattern is None:
+        pattern = re.compile(r'(?<!\w)' + re.escape(word) + r'(?!\w)', re.IGNORECASE | re.UNICODE)
+        _pattern_cache[word] = pattern
+    return pattern
+
+
+def matches_banned_word(words: list[str], text: str) -> str | None:
+    lowered = (text or '').casefold()
+    for word in words:
+        if word and _compile(word.strip().casefold()).search(lowered):
+            return word
+    return None
+
+
+@router.message(Command('antiword'), F.chat.type.in_({'group', 'supergroup'}))
+async def cmd_antiword(message: Message, is_admin: bool = False):
+    if not is_admin:
+        await message.answer(f"❌ <b>{sc('Admins only.')}</b>")
+        return
+    username = await get_bot_username(message.bot)
+    markup = kb([ubtn('⚙️ Open Settings', f'https://t.me/{username}?start=cfg{message.chat.id}')]) if username else None
+    await message.answer(box('Anti Word 🔤', [quote(sc('Anti-Word settings now live in my private chat — tap below.'))]), reply_markup=markup)
+
+
+@router.message(F.chat.type.in_({'group', 'supergroup'}), F.text | F.caption)
 async def check_words(message: Message):
     if not message.from_user:
         raise SkipHandler
+    if message.text and message.text.startswith('/'):
+        raise SkipHandler
     if await check_is_admin(message.bot, message.chat.id, message.from_user.id):
         raise SkipHandler
+    if message.sender_chat is not None:
+        raise SkipHandler
     settings = await get_settings(message.chat.id)
-    if not settings['antiword']:
+    if not settings.get('antiword'):
         raise SkipHandler
     banned = await get_banned_words(message.chat.id)
     if not banned:
         raise SkipHandler
-    text_lower = (message.text or '').casefold()
-    for word in banned:
-        if word and word.casefold() in text_lower:
+    text = message.text or message.caption or ''
+    word = matches_banned_word(banned, text)
+    if not word:
+        raise SkipHandler
+    user_id = message.from_user.id
+    mention = mention_by_name(user_id, message.from_user.full_name)
+    try:
+        await message.delete()
+    except Exception:
+        pass
+    action = settings.get('antiword_action', 'delete')
+    if action == 'warn':
+        count = await add_warning(message.chat.id, user_id, f'Used banned word: {word}')
+        if count >= settings.get('warn_limit', 3):
+            await answer_and_autodelete(message, f'⚠️ {mention} {sc("kicked — warn limit reached.")}')
             try:
-                await message.delete()
+                await message.bot.ban_chat_member(message.chat.id, user_id)
+                await message.bot.unban_chat_member(message.chat.id, user_id)
             except Exception:
                 pass
-            action = settings['antiword_action']
-            user_id = message.from_user.id
-            mention = mention_by_name(user_id, message.from_user.full_name)
-            if action == 'warn':
-                count = await add_warning(message.chat.id, user_id, f'Used banned word: {word}')
-                if count >= settings['warn_limit']:
-                    await answer_and_autodelete(message, f'⚠️ {mention} has been kicked for exceeding the warn limit.')
-                    try:
-                        await message.bot.ban_chat_member(message.chat.id, user_id)
-                        await message.bot.unban_chat_member(message.chat.id, user_id)
-                    except Exception:
-                        pass
-                else:
-                    await answer_and_autodelete(message, f"🔤 <b>Banned word removed.</b>\n⚠️ {mention} has been warned ({count}/{settings['warn_limit']})")
-            elif action == 'kick':
-                await answer_and_autodelete(message, f'🚪 {mention} was kicked for using a banned word.')
-                try:
-                    await message.bot.ban_chat_member(message.chat.id, user_id)
-                    await message.bot.unban_chat_member(message.chat.id, user_id)
-                except Exception:
-                    pass
-            elif action == 'ban':
-                await answer_and_autodelete(message, f'🔨 {mention} was banned for using a banned word.')
-                try:
-                    await message.bot.ban_chat_member(message.chat.id, user_id)
-                except Exception:
-                    pass
-            else:
-                await answer_and_autodelete(message, f'🔤 <b>Message deleted</b> — banned word used by {mention}.')
-            return
-    raise SkipHandler
+        else:
+            await answer_and_autodelete(message, f"🔤 {sc('Banned word removed.')}\n⚠️ {mention} {sc('warned')} ({count}/{settings.get('warn_limit', 3)})")
+    elif action == 'kick':
+        await answer_and_autodelete(message, f'🚪 {mention} {sc("was kicked for using a banned word.")}')
+        try:
+            await message.bot.ban_chat_member(message.chat.id, user_id)
+            await message.bot.unban_chat_member(message.chat.id, user_id)
+        except Exception:
+            pass
+    elif action == 'ban':
+        await answer_and_autodelete(message, f'🔨 {mention} {sc("was banned for using a banned word.")}')
+        try:
+            await message.bot.ban_chat_member(message.chat.id, user_id)
+        except Exception:
+            pass
+    else:
+        await answer_and_autodelete(message, f"🔤 {sc('Message deleted')} — {mention}.")
