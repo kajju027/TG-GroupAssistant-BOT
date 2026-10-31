@@ -108,9 +108,12 @@ def maybe_react(message: Message, settings: dict) -> None:
     """Fire-and-forget: schedules a reaction without blocking the update."""
     if not settings.get('reaction_enabled'):
         return
+    # Skip messages from other bots (groups) — prevents reaction loops.
     user = message.from_user
     if user is not None and user.is_bot and message.sender_chat is None:
         return
+    # Channel posts: sender_chat equals the channel itself, that's fine —
+    # only skip when sender_chat is a *different* bot-authored channel.
     asyncio.create_task(react_to_message(message, settings))
 
 
@@ -172,9 +175,14 @@ async def cb_reaction_quick(callback: CallbackQuery):
 
 
 # ------------------------------------------------------------- engines ----
-@router.message(F.chat.type.in_({'group', 'supergroup'}), ~F.text.startswith('/'))
+@router.message(F.chat.type.in_({'group', 'supergroup'}))
 async def on_new_group_message(message: Message):
+    """Catch-all for group messages. Service messages and commands never
+    react; everything else triggers a reaction when enabled."""
     if _is_service_message(message):
+        raise SkipHandler
+    text = message.text or message.caption or ''
+    if text.startswith('/'):
         raise SkipHandler
     settings = await get_settings(message.chat.id)
     if settings.get('reaction_enabled'):
@@ -182,8 +190,16 @@ async def on_new_group_message(message: Message):
     raise SkipHandler
 
 
-@router.channel_post(~F.text.startswith('/'))
+@router.channel_post()
 async def on_new_channel_post(message: Message):
+    """React to every channel post — text, photo, video, voice, anything.
+    Channel posts have no from_user, so the bot-admin check happens
+    implicitly: if the bot isn't an admin in the channel, Telegram rejects
+    the set_message_reaction call silently and we move on."""
+    text = message.text or message.caption or ''
+    if text.startswith('/'):
+        # /reaction command on a channel — handled by cmd_reaction_channel
+        raise SkipHandler
     settings = await get_settings(message.chat.id)
     if settings.get('reaction_enabled'):
         maybe_react(message, settings)
