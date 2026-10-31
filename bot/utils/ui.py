@@ -6,28 +6,22 @@ from html import escape
 
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
-from bot.core.config import REACT_POOL
 from bot.utils.style import to_small_caps
+
+BUTTON_TEXT_LIMIT = 34
+
+# One short, subtle divider — used sparingly on purpose.
+DIVIDER = '<code>────────</code>'
 
 
 def sc(t: str) -> str:
-    """Small caps with a twist: the first letter of every word stays a normal
-    capital letter and the rest of the word becomes small caps.
-
-    "Tagging Everyone" -> "Tᴀɢɢɪɴɢ Eᴠᴇʀʏᴏɴᴇ"
-    """
+    """Small caps: the first letter of every word stays a normal capital,
+    the rest becomes small caps. "Tagging Everyone" → "Tᴀɢɢɪɴɢ Eᴠᴇʀʏᴏɴᴇ"."""
     return to_small_caps(t)
-
-
-DIVIDER = '<code>───────────────</code>'
 
 
 def hdr(title: str, icon: str = '✦') -> str:
     return f'{icon} <b>{sc(title)}</b>'
-
-
-def ftr(tag: str = '') -> str:
-    return f'<i>{sc(tag)}</i>' if tag else ''
 
 
 def sep() -> str:
@@ -35,19 +29,14 @@ def sep() -> str:
 
 
 def row(label: str, value: str, icon: str = '') -> str:
-    """One clean settings line: `Label · value`. The legacy `icon` argument is
-    accepted so old call sites keep working, but it is no longer rendered."""
+    """One clean settings line: `Label · value`."""
     return f'<b>{sc(label)}</b> · {value}'
 
 
-def box(title: str, lines: list, footer_tag: str = '', icon: str = '✦') -> str:
-    """Build a clean panel: title, thin divider, body lines, optional footer."""
+def box(title: str, lines: list, icon: str = '✦') -> str:
+    """Clean panel: bold small-caps title, one thin divider, body lines."""
     body = [line for line in lines if line is not None and line != '']
-    parts = [hdr(title, icon), DIVIDER, *body]
-    footer = ftr(footer_tag)
-    if footer:
-        parts += [DIVIDER, footer]
-    return '\n'.join(parts)
+    return '\n'.join([hdr(title, icon), DIVIDER, *body])
 
 
 def quote(text: str) -> str:
@@ -55,7 +44,7 @@ def quote(text: str) -> str:
 
 
 def quote_expandable(text: str) -> str:
-    """A collapsed-by-default blockquote (Telegram native)."""
+    """Collapsed-by-default blockquote (Telegram native)."""
     return f'<blockquote expandable>{text}</blockquote>'
 
 
@@ -75,38 +64,56 @@ def link(name: str, uid: int) -> str:
     return f'<a href="tg://user?id={int(uid)}">{escape(name)}</a>'
 
 
+# ------------------------------------------------------------- buttons -----
 def btn(text: str, data: str) -> InlineKeyboardButton:
-    return InlineKeyboardButton(text=text, callback_data=data)
+    """Styled button: small caps, trimmed length — used everywhere so no
+    button ever ships with a normal font or a bloated label."""
+    label = to_small_caps(str(text))
+    if len(label) > BUTTON_TEXT_LIMIT:
+        label = label[:BUTTON_TEXT_LIMIT - 1].rstrip() + '…'
+    return InlineKeyboardButton(text=label, callback_data=data)
 
 
 def ubtn(text: str, url: str) -> InlineKeyboardButton:
-    return InlineKeyboardButton(text=text, url=url)
+    label = to_small_caps(str(text))
+    if len(label) > BUTTON_TEXT_LIMIT:
+        label = label[:BUTTON_TEXT_LIMIT - 1].rstrip() + '…'
+    return InlineKeyboardButton(text=label, url=url)
+
+
+def dot(state: bool) -> str:
+    """Colour indicator: green = on, red = off."""
+    return '🟢' if state else '🔴'
+
+
+def status_text(on: bool) -> str:
+    return f'{dot(on)} <b>{sc("On") if on else sc("Off")}</b>'
+
+
+def tbtn(label: str, state: bool, data: str) -> InlineKeyboardButton:
+    """Toggle button with colour indication: 🟢 Welcome · On"""
+    text = f"{dot(state)} {sc(label)} · {sc('On') if state else sc('Off')}"
+    return InlineKeyboardButton(text=text, callback_data=data)
 
 
 def kb(*rows) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[list(r) for r in rows])
 
 
-def rand_emoji() -> str:
-    return random.choice(REACT_POOL)
+def back_kb(data: str, extra: InlineKeyboardButton | None = None) -> InlineKeyboardMarkup:
+    if extra is not None:
+        return kb([extra, btn('🔙 Back', data)])
+    return kb([btn('🔙 Back', data)])
 
 
 def status_icon(on: bool) -> str:
     return '🟢' if on else '🔴'
 
 
-def status_text(on: bool) -> str:
-    """Coloured status used in both messages and button labels."""
-    return f'{status_icon(on)} {sc("On") if on else sc("Off")}'
+def rand_emoji(pool: list[str] | None = None) -> str:
+    from bot.core.config import REACT_POOL
 
-
-def toggle_btn(label: str, state: bool, feature: str, chat_id: int) -> InlineKeyboardButton:
-    """Inline toggle button with colour indication (green on / red off)."""
-    action = 'off' if state else 'on'
-    return InlineKeyboardButton(
-        text=f"{status_icon(state)} {label} · {'ON' if state else 'OFF'}",
-        callback_data=f'toggle:{feature}:{chat_id}:{action}',
-    )
+    return random.choice(pool or REACT_POOL)
 
 
 def progress_bar(current: int, total: int, width: int = 10) -> str:
@@ -133,3 +140,15 @@ def fmt_dur(s) -> str:
     if h:
         return f'{h}:{m:02d}:{sec:02d}'
     return f'{m}:{sec:02d}'
+
+
+def fmt_uptime(seconds: float) -> str:
+    seconds = int(seconds)
+    d, seconds = divmod(seconds, 86400)
+    h, seconds = divmod(seconds, 3600)
+    m, _ = divmod(seconds, 60)
+    if d:
+        return f'{d}ᴅ {h}ʜ {m}ᴍ'
+    if h:
+        return f'{h}ʜ {m}ᴍ'
+    return f'{m}ᴍ'
