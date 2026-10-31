@@ -190,7 +190,7 @@ async def cmd_pin(message: Message, is_admin: bool = False):
         return
     try:
         await message.bot.pin_chat_message(message.chat.id, message.reply_to_message.message_id, disable_notification=True)
-        await anim.play(message, f'📌 <b>{sc('Message pinned.')}</b>', kind='success', delay=anim.FAST_DELAY)
+        await anim.play(message, f'📌 <b>{sc("Message pinned.")}</b>', kind='success', delay=anim.FAST_DELAY)
     except Exception as e:
         await message.answer(f"❌ <b>{sc('Failed')}:</b> {escape(str(e)[:120])}")
 
@@ -205,7 +205,7 @@ async def cmd_unpin(message: Message, is_admin: bool = False):
             await message.bot.unpin_chat_message(message.chat.id, message.reply_to_message.message_id)
         else:
             await message.bot.unpin_chat_message(message.chat.id)
-        await anim.play(message, f'📌 <b>{sc('Message unpinned.')}</b>', kind='success', delay=anim.FAST_DELAY)
+        await anim.play(message, f'📌 <b>{sc("Message unpinned.")}</b>', kind='success', delay=anim.FAST_DELAY)
     except Exception as e:
         await message.answer(f"❌ <b>{sc('Failed')}:</b> {escape(str(e)[:120])}")
 
