@@ -215,3 +215,34 @@ async def get_seen_members(chat_id: int) -> list[dict[str, Any]]:
             continue
     result.sort(key=lambda item: item.get('seen', ''), reverse=True)
     return result
+
+
+# ----------------------------------------------------------- auto-purge ----
+async def get_autodelete_cursor(chat_id: int) -> int:
+    data = await load_chat(chat_id)
+    return int(data.get('autodelete_last_id', 0) or 0)
+
+
+async def set_autodelete_cursor(chat_id: int, message_id: int) -> None:
+    """Advance the cursor so the next sweep picks up where this one stopped."""
+    await mutate_chat(chat_id, lambda data: data.__setitem__('autodelete_last_id', int(message_id)))
+
+
+async def acquire_autodelete_lock(chat_id: int) -> bool:
+    """Try to grab the sweep lock. Returns True when acquired, False when a
+    sweep is already running (avoids overlapping deletes)."""
+    acquired = False
+
+    def grab(data: dict[str, Any]) -> None:
+        nonlocal acquired
+        if data.get('autodelete_running'):
+            return
+        data['autodelete_running'] = True
+        acquired = True
+
+    await mutate_chat(chat_id, grab)
+    return acquired
+
+
+async def release_autodelete_lock(chat_id: int) -> None:
+    await mutate_chat(chat_id, lambda data: data.__setitem__('autodelete_running', False))
