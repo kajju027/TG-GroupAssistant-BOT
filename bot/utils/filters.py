@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from aiogram.filters import BaseFilter
 from aiogram.types import Message, TelegramObject
 
