@@ -15,25 +15,43 @@ from bot.utils.ui import bold, box, italic, mono, quote, row, sc
 
 router = Router()
 
+# Compile cache keyed by the *normalised* keyword so a casefolded lookup
+# hits the same pattern as the original store.
 _match_cache: dict[str, re.Pattern] = {}
 
 
+def _normalise_keyword(keyword: str) -> str:
+    return (keyword or '').strip().casefold()
+
+
 def _compile(keyword: str) -> re.Pattern:
-    pattern = _match_cache.get(keyword)
+    """Word-boundary aware matcher. 'hi' matches 'hi there' and '#hi' but
+    never 'this' or 'shopping'. Phrases with spaces match whole.
+    Unicode-aware so it works for Bengali / Hindi / etc."""
+    key = _normalise_keyword(keyword)
+    if not key:
+        # Impossible to match anything
+        return re.compile(r'(?!.*)')
+    pattern = _match_cache.get(key)
     if pattern is None:
-        # Word-boundary matching: "hi" matches "hi there" and "#hi" but
-        # never "this" or "shopping". Phrases (with spaces) match whole.
-        pattern = re.compile(r'(?<!\w)' + re.escape(keyword) + r'(?!\w)', re.IGNORECASE | re.UNICODE)
-        _match_cache[keyword] = pattern
+        pattern = re.compile(
+            r'(?<!\w)' + re.escape(key) + r'(?!\w)',
+            re.IGNORECASE | re.UNICODE,
+        )
+        _match_cache[key] = pattern
     return pattern
 
 
 def matches_filter(keyword: str, text: str) -> bool:
-    return bool(text) and bool(_compile(keyword.strip().casefold()).search(text))
+    if not text:
+        return False
+    return bool(_compile(keyword).search(text))
 
 
 def body_text(message: Message) -> str:
-    return message.text or message.caption or ''
+    """Every text-bearing field on a message — so filters trigger on
+    captions, link previews and the body alike."""
+    return (message.text or message.caption or message.html_text or '').strip()
 
 
 @router.message(Command('filter'), F.chat.type.in_({'group', 'supergroup'}))
@@ -55,6 +73,8 @@ async def cmd_filter(message: Message, is_admin: bool = False):
     keyword = parts[1].casefold()[:60]
     reply = parts[2][:4000]
     await db.add_filter(message.chat.id, keyword, reply)
+    # Bust the cache so the new keyword is picked up immediately.
+    _match_cache.pop(_normalise_keyword(keyword), None)
     text = box('Filter Added ✅', [
         row('Keyword', mono(keyword)),
         row('Reply', reply[:180] + ('…' if len(reply) > 180 else '')),
@@ -86,6 +106,8 @@ async def cmd_stop(message: Message, is_admin: bool = False):
         return
     keyword = parts[1].casefold().strip()
     await remove_filter(message.chat.id, keyword)
+    # Bust the cache so the removed keyword stops matching immediately.
+    _match_cache.pop(_normalise_keyword(keyword), None)
     text = box('Filter Removed ✅', [row('Keyword', mono(keyword))])
     await anim.play(message, text, kind='success', delay=anim.FAST_DELAY)
 
@@ -103,7 +125,9 @@ async def check_filters(message: Message):
     if not filters:
         raise SkipHandler
     for item in filters:
-        if item['keyword'] and matches_filter(item['keyword'], text):
+        if not item.get('keyword'):
+            continue
+        if matches_filter(item['keyword'], text):
             try:
                 await message.answer(item['reply'])
             except TelegramBadRequest:
