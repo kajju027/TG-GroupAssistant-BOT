@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from html import escape
 
 from aiogram import F, Router
@@ -260,6 +261,121 @@ async def cmd_del(message: Message, is_admin: bool = False):
         await message.delete()
     except Exception as e:
         await message.answer(f"❌ <b>{sc('Failed')}:</b> {escape(str(e)[:120])}")
+
+
+# ------------------------------------------------------------ purgeall ----
+# One-tap "delete everything in this group" — a confirmation step keeps it
+# safe, and the actual wipe walks id ranges in batches so it stays gentle
+# on Telegram's flood limits. Owner/sudo OR group admins can use it.
+_PURGEALL_CHUNK = 100
+_PURGEALL_PROBE = 100
+_PURGEALL_MAX_IDS = 5000  # safety ceiling so a single tap can't nuke huge histories
+_PURGEALL_SLEEP = 0.4
+
+
+@router.message(Command('purgeall'), _GROUP)
+async def cmd_purgeall(message: Message, is_admin: bool = False):
+    """Send the confirm card. Wiping only happens after the button is tapped."""
+    if not is_admin:
+        await message.answer(f"❌ <b>{sc('Admins only.')}</b>")
+        return
+    from bot.utils.ui import quote, kb, btn
+
+    markup = kb(
+        [btn('🗑 Yes, Delete Everything', f'purgeall:go:{message.chat.id}')],
+        [btn('❌ Cancel', 'purgeall:no')],
+    )
+    await message.answer(box('Delete All Messages 🧹', [
+        quote(sc('This deletes every message the bot can reach in this group — there is no undo. Tap the button below to confirm.')),
+    ]), reply_markup=markup)
+
+
+@router.callback_query(F.data == 'purgeall:no')
+async def cb_purgeall_cancel(callback):
+    await callback.answer('Cancelled')
+    try:
+        await callback.message.delete()
+    except Exception:
+        pass
+
+
+@router.callback_query(F.data.startswith('purgeall:go:'))
+async def cb_purgeall_go(callback):
+    from bot.utils.helpers import is_admin as check_admin
+
+    try:
+        chat_id = int(callback.data.split(':')[2])
+    except (IndexError, ValueError):
+        await callback.answer('Invalid request.', show_alert=True)
+        return
+    if not await check_admin(callback.bot, chat_id, callback.from_user.id):
+        await callback.answer('Admins only.', show_alert=True)
+        return
+    await callback.answer('Wiping…')
+
+    # Edit the card so the user gets feedback the wipe is in flight.
+    try:
+        await callback.message.edit_text(box('Wiping 🧹', [quote(sc('Deleting every message the bot can reach. This may take a while — please don\'t spam this group while it runs.'))]))
+    except Exception:
+        pass
+
+    bot = callback.bot
+    deleted = 0
+    cursor = 1
+    failed_streak = 0
+
+    while deleted < _PURGEALL_MAX_IDS:
+        ids = list(range(cursor, cursor + _PURGEALL_PROBE))
+        try:
+            messages = await bot.get_messages(chat_id, ids)
+        except Exception:
+            messages = None
+        batch = []
+        next_cursor = cursor
+        found_any = False
+        for msg in (messages or []):
+            if msg is None:
+                continue
+            found_any = True
+            batch.append(msg.message_id)
+            if msg.message_id > next_cursor:
+                next_cursor = msg.message_id
+        if not found_any:
+            # No messages in this window; advance and try the next chunk,
+            # but if we keep hitting empty windows, the history ended.
+            failed_streak += 1
+            if failed_streak >= 3:
+                break
+            cursor = next_cursor + 1
+            continue
+        failed_streak = 0
+        if batch:
+            try:
+                result = await bot.delete_messages(chat_id, batch[:_PURGEALL_CHUNK])
+                deleted += sum(1 for ok in result if ok)
+            except Exception as error:
+                # Fall back to one-by-one for resilience.
+                for mid in batch[:_PURGEALL_CHUNK]:
+                    try:
+                        await bot.delete_message(chat_id, mid)
+                        deleted += 1
+                    except Exception:
+                        pass
+                    await asyncio.sleep(_PURGEALL_SLEEP)
+        cursor = next_cursor + 1
+        await asyncio.sleep(_PURGEALL_SLEEP)
+
+    try:
+        await callback.message.edit_text(box('Wipe Complete 🧹', [
+            row('Deleted', bold(str(deleted))),
+            '',
+            quote(sc('Everything the bot could see has been removed.')),
+        ]))
+    except Exception:
+        try:
+            await callback.message.answer(box('Wipe Complete 🧹', [bold(f"🧹 {deleted}")]))
+        except Exception:
+            pass
 
 
 # ----------------------------------------------------------------- info ----
