@@ -17,7 +17,28 @@ def _small_caps_word(word: str) -> str:
 
 
 def _small_caps_plain(text: str) -> str:
-    return _WORD_RE.sub(lambda m: _small_caps_word(m.group(0)), text)
+    """Small-caps every word that starts a new word position.
+
+    A run that directly follows a letter, digit or apostrophe is treated as
+    the tail of an already styled word (the "s" in "Dᴏᴡɴʟᴏᴀᴅs") and is left
+    alone, so styling the same text twice is a safe no-op. That matters
+    because handlers style their panels with sc() and the global outgoing
+    patch styles them a second time.
+    """
+    out = []
+    pos = 0
+    for match in _WORD_RE.finditer(text):
+        if match.start() > pos:
+            out.append(text[pos:match.start()])
+        previous = text[match.start() - 1] if match.start() else ''
+        if previous and (previous.isalnum() or previous == "'"):
+            out.append(match.group(0))
+        else:
+            out.append(_small_caps_word(match.group(0)))
+        pos = match.end()
+    if pos < len(text):
+        out.append(text[pos:])
+    return ''.join(out)
 
 
 _HTML_TAG_RE = re.compile('</?[a-zA-Z][^<>]*>')
@@ -46,7 +67,7 @@ def to_small_caps(text: str) -> str:
 
 def patch_outgoing_messages():
     from aiogram import Bot
-    from aiogram.types import Message, CallbackQuery
+    from aiogram.types import LinkPreviewOptions, Message, CallbackQuery
     if getattr(patch_outgoing_messages, '_patched', False):
         return
     patch_outgoing_messages._patched = True
@@ -57,6 +78,10 @@ def patch_outgoing_messages():
             args[text_pos] = to_small_caps(args[text_pos])
         elif text_key in kwargs and isinstance(kwargs[text_key], str):
             kwargs[text_key] = to_small_caps(kwargs[text_key])
+        # Manager-bot messages look cleaner without link previews; callers can
+        # still opt in by passing their own link_preview_options.
+        if 'link_preview_options' not in kwargs and 'disable_web_page_preview' not in kwargs:
+            kwargs['link_preview_options'] = LinkPreviewOptions(is_disabled=True)
         return (tuple(args), kwargs)
 
     _orig_msg_answer = Message.answer
@@ -79,6 +104,8 @@ def patch_outgoing_messages():
 
     async def send_message(self, chat_id, text, *args, **kwargs):
         text = to_small_caps(text) if isinstance(text, str) else text
+        if 'link_preview_options' not in kwargs and 'disable_web_page_preview' not in kwargs:
+            kwargs['link_preview_options'] = LinkPreviewOptions(is_disabled=True)
         return await _orig_bot_send_message(self, chat_id, text, *args, **kwargs)
 
     async def cbq_answer(self, text=None, *args, **kwargs):
