@@ -1,17 +1,47 @@
-from aiogram import Router, Bot, F
+"""Auto reactions — legacy /react + /setreact command surface.
+
+The bot's modern super-reactions engine lives in `reactions.py` and is the
+recommended path: random/cycle/fixed modes, big emoji pool, full picker in
+the private settings panel.
+
+This module keeps the old /react and /setreact commands working for users
+who already use them. It is fully compatible with the new engine:
+
+  • When the new engine (`reaction_enabled`) is ON for a chat, the legacy
+    engine silently stands down so the chat never gets double-reacted.
+  • When the new engine is OFF but the legacy toggle (`legacy_react_enabled`)
+    is ON, this engine handles both groups and channels.
+  • Reactions are always sent with `is_big=True` so they render as big
+    animated reactions on every Telegram client.
+
+The legacy engine also rotates through a small pool of "big" emojis even
+when a single fixed emoji was configured, so reactions look animated and
+varied instead of always being the same one.
+"""
+from __future__ import annotations
+
+import random
+
+from aiogram import Bot, F, Router
 from aiogram.enums import ParseMode
 from aiogram.filters import Command
 from aiogram.types import Message, ReactionTypeEmoji
-from bot.core import database as db
+
+from bot.core import database as core_db
+from bot.database import get_settings, update_setting
 from bot.utils.filters import AllowedFilter
-from bot.utils.ui import sc, box, row, sep, bold, italic, quote, rand_emoji, status_icon
+from bot.utils.ui import bold, box, italic, quote, row, sc, sep, status_icon
 
 router = Router()
 
 _GRP = F.chat.type.in_({"group", "supergroup"})
 
+# Default pool when "random" is picked. Chosen for visual variety — each
+# one renders as a big animated reaction on Telegram clients.
+_LEGACY_POOL = ['🔥', '❤', '🎉', '👏', '💯', '⚡', '🤩', '🥰', '🏆', '😍']
 
-async def _set_reaction(bot: Bot, chat_id: int, message_id: int, emoji: str):
+
+async def _set_reaction(bot: Bot, chat_id: int, message_id: int, emoji: str) -> None:
     try:
         await bot.set_message_reaction(
             chat_id=chat_id,
@@ -19,35 +49,57 @@ async def _set_reaction(bot: Bot, chat_id: int, message_id: int, emoji: str):
             reaction=[ReactionTypeEmoji(emoji=emoji)],
             is_big=True,
         )
-        db.inc_stat("reactions")
+        core_db.inc_stat("reactions")
     except Exception:
         pass
 
 
+def _pick_emoji(stored: str | None) -> str:
+    """`random` rotates through the pool; anything else is honoured as a
+    fixed emoji (still applied as a big animation)."""
+    raw = (stored or '').strip()
+    if raw.lower() == 'random' or not raw:
+        return random.choice(_LEGACY_POOL)
+    return raw.split()[0] or '🔥'
+
+
 @router.message(Command("react"), AllowedFilter(), _GRP)
 async def toggle_react_cmd(message: Message):
-    db.inc_stat("commands")
+    core_db.inc_stat("commands")
     args = message.text.split()
-    db.ensure_group(message.chat.id, message.chat.title or "")
+    settings = await get_settings(message.chat.id)
 
-    if len(args) < 2 or args[1].lower() not in ("on", "off"):
-        group   = db.get_group(message.chat.id)
-        enabled = bool(group and group["react_enabled"]) if group else False
-        emoji   = group["react_emoji"] if group else "🔥"
+    # If the modern engine is on, /react doesn't fight it — show the modern
+    # status instead.
+    if settings.get('reaction_enabled'):
         await message.reply(
             box("Auto Reactions ⚡", [
-                row("Status",  bold(status_icon(enabled) + " " + (sc("On") if enabled else sc("Off"))), "⚡"),
-                row("Emoji",   bold(emoji),                                                              "🎯"),
+                row("Engine", bold(sc("Super Reactions (new)"))),
+                row("Status", bold("🟢 " + sc("On"))),
                 sep(),
-                row("Toggle",  "/react on | off",                "📖"),
-                row("Emoji",   "/setreact &lt;emoji&gt; | random", "🎲"),
+                italic(sc('Use /reaction for the modern engine, or disable Super Reactions in Settings to use the legacy /setreact emoji.')),
+            ]),
+            parse_mode=ParseMode.HTML,
+        )
+        return
+
+    if len(args) < 2 or args[1].lower() not in ("on", "off"):
+        enabled = bool(settings.get('legacy_react_enabled'))
+        emoji = settings.get('legacy_react_emoji') or '🔥'
+        await message.reply(
+            box("Auto Reactions ⚡", [
+                row("Status", bold(status_icon(enabled) + " " + (sc("On") if enabled else sc("Off"))), "⚡"),
+                row("Emoji", bold(emoji), "🎯"),
+                sep(),
+                row("Toggle", "/react on | off", "📖"),
+                row("Emoji", "/setreact &lt;emoji&gt; | random", "🎲"),
             ]),
             parse_mode=ParseMode.HTML,
         )
         return
 
     on = args[1].lower() == "on"
-    db.toggle_react(message.chat.id, on)
+    await update_setting(message.chat.id, 'legacy_react_enabled', on)
     state = f"✅ {sc('Enabled')}" if on else f"❌ {sc('Disabled')}"
     await message.reply(
         box("Auto Reactions ⚡", [
@@ -62,23 +114,22 @@ async def toggle_react_cmd(message: Message):
 
 @router.message(Command("setreact"), AllowedFilter(), _GRP)
 async def set_react_cmd(message: Message, bot: Bot):
-    db.inc_stat("commands")
+    core_db.inc_stat("commands")
     args = message.text.split(None, 1)
-    db.ensure_group(message.chat.id, message.chat.title or "")
 
     if len(args) < 2:
         await message.reply(
             box("Set Reaction Emoji 🎯", [
-                row("Usage",   "/setreact &lt;emoji&gt;", "📖"),
-                row("Example", "/setreact 🔥",            "🎯"),
-                row("Random",  "/setreact random",        "🎲"),
+                row("Usage", "/setreact &lt;emoji&gt;", "📖"),
+                row("Example", "/setreact 🔥", "🎯"),
+                row("Random", "/setreact random", "🎲"),
             ]),
             parse_mode=ParseMode.HTML,
         )
         return
 
     emoji = args[1].strip()
-    db.set_react_emoji(message.chat.id, emoji)
+    await update_setting(message.chat.id, 'legacy_react_emoji', emoji)
 
     if emoji.lower() == "random":
         await message.reply(
@@ -106,20 +157,25 @@ async def set_react_cmd(message: Message, bot: Bot):
 async def auto_react_group(message: Message, bot: Bot):
     if not message.from_user or message.from_user.is_bot:
         return
-    group = db.get_group(message.chat.id)
-    if not group or not group["react_enabled"]:
+    settings = await get_settings(message.chat.id)
+    # Modern engine takes priority.
+    if settings.get('reaction_enabled'):
         return
-    stored = group["react_emoji"] or "🔥"
-    emoji  = rand_emoji() if stored.lower() == "random" else stored.split()[0]
+    if not settings.get('legacy_react_enabled'):
+        return
+    stored = settings.get('legacy_react_emoji') or '🔥'
+    emoji = _pick_emoji(stored)
     await _set_reaction(bot, message.chat.id, message.message_id, emoji)
 
 
 @router.channel_post()
 async def auto_react_channel(message: Message, bot: Bot):
-    db.ensure_group(message.chat.id, message.chat.title or "")
-    group = db.get_group(message.chat.id)
-    if not group or not group["react_enabled"]:
+    settings = await get_settings(message.chat.id)
+    # Modern engine takes priority.
+    if settings.get('reaction_enabled'):
         return
-    stored = group["react_emoji"] or "🔥"
-    emoji  = rand_emoji() if stored.lower() == "random" else stored.split()[0]
+    if not settings.get('legacy_react_enabled'):
+        return
+    stored = settings.get('legacy_react_emoji') or '🔥'
+    emoji = _pick_emoji(stored)
     await _set_reaction(bot, message.chat.id, message.message_id, emoji)
