@@ -1,62 +1,141 @@
 from __future__ import annotations
+
 from aiogram import F, Router
 from aiogram.filters import Command
-from aiogram.enums import ChatMemberStatus
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
-from bot.database import list_managed_chats, sync_chat_index
-from bot.utils.helpers import groups_picker_kb, is_admin, settings_main_kb
+
+from bot.core.config import OWNER_ID, SUDO_IDS
+from bot.database import list_managed_chats
+from bot.handlers.chat_tracker import refresh_chat_index
+from bot.utils.helpers import get_bot_username, is_admin, safe_edit
+from bot.utils.ui import box, btn, kb, quote, row, sc, ubtn
+
 router = Router()
-_GROUP_TYPES = {'group', 'supergroup'}
 
-async def _bot_is_admin(bot, chat_id: int) -> bool:
-    try:
-        me = await bot.get_me()
-        member = await bot.get_chat_member(chat_id, me.id)
-        return member.status in {ChatMemberStatus.ADMINISTRATOR, ChatMemberStatus.CREATOR}
-    except Exception:
-        return False
+PAGE_SIZE = 8
 
-async def _index_group(message: Message) -> None:
-    try:
-        admins = await message.bot.get_chat_administrators(message.chat.id)
-        admin_ids = [admin.user.id for admin in admins if not admin.user.is_bot]
-    except Exception:
-        admin_ids = []
-    bot_is_admin = await _bot_is_admin(message.bot, message.chat.id)
-    await sync_chat_index(message.chat.id, message.chat.title or 'Untitled', message.chat.type, bot_is_admin, admin_ids)
 
-async def _show_group_list(message: Message, user_id: int) -> None:
-    groups = await list_managed_chats(user_id)
-    if not groups:
-        await message.answer('⚙️ <b>Settings panel</b>\n\nNo manageable groups are indexed yet. Add me as an admin to a group, then send <code>/settings</code> inside that group once.')
-        return
-    await message.answer('⚙️ <b>Choose a group to manage</b>', reply_markup=groups_picker_kb(groups))
+def _is_privileged(user_id: int) -> bool:
+    return user_id == OWNER_ID or user_id in SUDO_IDS
 
-@router.message(Command('settings'), F.chat.type == 'private')
-async def cmd_settings_private(message: Message):
-    await _show_group_list(message, message.from_user.id)
 
-@router.message(Command('settings'), F.chat.type.in_(_GROUP_TYPES))
-async def cmd_settings_group(message: Message, is_admin: bool=False):
+async def can_manage(obj, chat_id: int, user_id: int) -> bool:
+    """Owner/sudo can open any chat panel; everyone else must be an admin
+    of that exact chat (checked live)."""
+    if _is_privileged(user_id):
+        return True
+    return await is_admin(obj.bot, chat_id, user_id)
+
+
+def _empty_text() -> str:
+    return box('My Chats ⚙️', [
+        quote(sc('No chats yet. Add me as an admin to a group or channel, then tap Refresh.')),
+    ])
+
+
+def _list_text(chats: list) -> str:
+    groups = [c for c in chats if c.get('type') != 'channel']
+    channels = [c for c in chats if c.get('type') == 'channel']
+    missing = [c for c in chats if not c.get('bot_in_chat', True)]
+    lines = [
+        row('Groups', f"👥 <b>{len(groups)}</b>"),
+        row('Channels', f"📢 <b>{len(channels)}</b>"),
+    ]
+    if missing:
+        lines.append(row('Needs Re-Add', f"⚠️ <b>{len(missing)}</b>"))
+    lines += [
+        '',
+        quote(sc('Pick a chat to configure. Everything is managed right here — you never have to open the group or channel.')),
+    ]
+    return box('My Chats ⚙️', lines)
+
+
+def _list_kb(chats: list, page: int) -> object:
+    total_pages = max(1, (len(chats) + PAGE_SIZE - 1) // PAGE_SIZE)
+    page = max(0, min(page, total_pages - 1))
+    chunk = chats[page * PAGE_SIZE:(page + 1) * PAGE_SIZE]
+    rows = []
+    for chat in chunk:
+        icon = '📢' if chat.get('type') == 'channel' else '👥'
+        status = '' if chat.get('bot_in_chat', True) else ' ⚠️'
+        title = (chat['title'] or 'Untitled')[:30]
+        rows.append([btn(f'{icon} {title}{status}', f"panel:open:{chat['chat_id']}")])
+    if total_pages > 1:
+        nav = []
+        if page > 0:
+            nav.append(btn('⬅️', f'panel:pg:{page - 1}'))
+        nav.append(btn(f'📃 {page + 1}/{total_pages}', 'panel:list'))
+        if page < total_pages - 1:
+            nav.append(btn('➡️', f'panel:pg:{page + 1}'))
+        rows.append(nav)
+    rows.append([btn('🔄 Refresh', 'panel:list:refresh'), btn('🏠 Home', 'menu:start')])
+    return kb(*rows)
+
+
+async def _show_list(message: Message, user_id: int, page: int = 0, *, edit: bool = False) -> None:
+    chats = await list_managed_chats(user_id, owner=_is_privileged(user_id))
+    if not chats:
+        text, markup = _empty_text(), kb([btn('🔄 Refresh', 'panel:list:refresh'), btn('🏠 Home', 'menu:start')])
+    else:
+        text, markup = _list_text(chats), _list_kb(chats, page)
+    if edit:
+        if await safe_edit(message, text, markup):
+            return
+    await message.answer(text, reply_markup=markup)
+
+
+# --------------------------------------------------------------- commands --
+@router.message(Command('settings', 'chats'), F.chat.type == 'private')
+async def cmd_settings_private(message: Message, state: FSMContext):
+    await state.clear()
+    await _show_list(message, message.from_user.id)
+
+
+@router.message(Command('settings'), F.chat.type.in_({'group', 'supergroup'}))
+async def cmd_settings_group(message: Message, is_admin: bool = False):
     if not is_admin:
-        await message.answer('❌ <b>Only group admins can open settings.</b>')
+        await message.answer(f"❌ <b>{sc('Only group admins can open settings.')}</b>")
         return
-    await _index_group(message)
-    if not await _bot_is_admin(message.bot, message.chat.id):
-        await message.answer('⚠️ <b>I need administrator rights</b> to enforce moderation settings. Please grant Delete Messages / Restrict Members rights first.')
-        return
-    await message.answer(f"⚙️ <b>Settings: {message.chat.title or 'this group'}</b>", reply_markup=settings_main_kb(message.chat.id))
+    await refresh_chat_index(message.bot, message.chat.id, message.chat.title or 'Untitled', message.chat.type, force=True)
+    username = await get_bot_username(message.bot)
+    markup = kb([ubtn('⚙️ Open In Private', f'https://t.me/{username}?start=cfg{message.chat.id}')]) if username else None
+    await message.answer(box('Settings ⚙️', [
+        quote(sc('All settings for this chat are managed in my private chat — tap below. Nothing is configured inside the group.')),
+    ]), reply_markup=markup)
 
+
+# -------------------------------------------------------------- callbacks --
 @router.callback_query(F.data == 'panel:list')
 async def panel_list(callback: CallbackQuery, state: FSMContext):
     await state.clear()
     await callback.answer()
-    groups = await list_managed_chats(callback.from_user.id)
-    if not groups:
-        await callback.message.edit_text('No manageable groups are indexed yet.')
+    if callback.message is None:
         return
-    await callback.message.edit_text('⚙️ <b>Choose a group to manage</b>', reply_markup=groups_picker_kb(groups))
+    await _show_list(callback.message, callback.from_user.id, edit=True)
+
+
+@router.callback_query(F.data == 'panel:list:refresh')
+async def panel_list_refresh(callback: CallbackQuery, state: FSMContext):
+    await state.clear()
+    await callback.answer('🔄')
+    if callback.message is None:
+        return
+    await _show_list(callback.message, callback.from_user.id, edit=True)
+
+
+@router.callback_query(F.data.startswith('panel:pg:'))
+async def panel_page(callback: CallbackQuery):
+    try:
+        page = int(callback.data.rsplit(':', 1)[1])
+    except (AttributeError, ValueError):
+        await callback.answer('Invalid page.', show_alert=True)
+        return
+    await callback.answer()
+    if callback.message is None:
+        return
+    await _show_list(callback.message, callback.from_user.id, page, edit=True)
+
 
 @router.callback_query(F.data.startswith('panel:open:'))
 async def panel_open(callback: CallbackQuery, state: FSMContext):
@@ -66,28 +145,24 @@ async def panel_open(callback: CallbackQuery, state: FSMContext):
     except (AttributeError, ValueError):
         await callback.answer('Invalid settings request.', show_alert=True)
         return
-    if not await is_admin(callback.bot, chat_id, callback.from_user.id):
-        await callback.answer('You are not an admin in that group.', show_alert=True)
+    if not await can_manage(callback, chat_id, callback.from_user.id):
+        await callback.answer('You are not an admin in that chat.', show_alert=True)
         return
     await callback.answer()
-    await callback.message.edit_text('⚙️ <b>Group settings</b>', reply_markup=settings_main_kb(chat_id))
+    from bot.handlers.settings import render_chat_panel
 
-@router.callback_query(F.data.startswith('menu:main:'))
-async def panel_main(callback: CallbackQuery, state: FSMContext):
-    await state.clear()
-    try:
-        chat_id = int(callback.data.rsplit(':', 1)[1])
-    except (AttributeError, ValueError):
-        await callback.answer('Invalid settings request.', show_alert=True)
-        return
-    if not await is_admin(callback.bot, chat_id, callback.from_user.id):
-        await callback.answer('You are not an admin in that group.', show_alert=True)
-        return
-    await callback.answer()
-    await callback.message.edit_text('⚙️ <b>Group settings</b>', reply_markup=settings_main_kb(chat_id))
+    if callback.message is not None:
+        text, markup = await render_chat_panel(chat_id)
+        if not await safe_edit(callback.message, text, markup):
+            await callback.message.answer(text, reply_markup=markup)
 
-@router.callback_query(F.data == 'close')
-async def panel_close(callback: CallbackQuery, state: FSMContext):
-    await state.clear()
-    await callback.answer('Closed')
-    await callback.message.delete()
+
+async def open_chat_panel_message(message: Message, chat_id: int) -> None:
+    """Deep-link entry (t.me/bot?start=cfg<id>): jump straight to the panel."""
+    if message.from_user is None or not await can_manage(message, chat_id, message.from_user.id):
+        await message.answer(f"❌ <b>{sc('You are not an admin in that chat.')}</b>")
+        return
+    from bot.handlers.settings import render_chat_panel
+
+    text, markup = await render_chat_panel(chat_id)
+    await message.answer(text, reply_markup=markup)
