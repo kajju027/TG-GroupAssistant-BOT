@@ -2,7 +2,12 @@ from __future__ import annotations
 
 import re
 
-_SMALL_CAPS_MAP = {'a': 'ᴀ', 'b': 'ʙ', 'c': 'ᴄ', 'd': 'ᴅ', 'e': 'ᴇ', 'f': 'ꜰ', 'g': 'ɢ', 'h': 'ʜ', 'i': 'ɪ', 'j': 'ᴊ', 'k': 'ᴋ', 'l': 'ʟ', 'm': 'ᴍ', 'n': 'ɴ', 'o': 'ᴏ', 'p': 'ᴘ', 'q': 'ǫ', 'r': 'ʀ', 's': 's', 't': 'ᴛ', 'u': 'ᴜ', 'v': 'ᴠ', 'w': 'ᴡ', 'x': 'x', 'y': 'ʏ', 'z': 'ᴢ'}
+_SMALL_CAPS_MAP = {
+    'a': 'ᴀ', 'b': 'ʙ', 'c': 'ᴄ', 'd': 'ᴅ', 'e': 'ᴇ', 'f': 'ꜰ', 'g': 'ɢ',
+    'h': 'ʜ', 'i': 'ɪ', 'j': 'ᴊ', 'k': 'ᴋ', 'l': 'ʟ', 'm': 'ᴍ', 'n': 'ɴ',
+    'o': 'ᴏ', 'p': 'ᴘ', 'q': 'ǫ', 'r': 'ʀ', 's': 'ꜱ', 't': 'ᴛ', 'u': 'ᴜ',
+    'v': 'ᴠ', 'w': 'ᴡ', 'x': 'x', 'y': 'ʏ', 'z': 'ᴢ',
+}
 _UPPER = set('ABCDEFGHIJKLMNOPQRSTUVWXYZ')
 _WORD_RE = re.compile("[A-Za-z]+(?:'[A-Za-z]+)?")
 
@@ -17,14 +22,10 @@ def _small_caps_word(word: str) -> str:
 
 
 def _small_caps_plain(text: str) -> str:
-    """Small-caps every word that starts a new word position.
-
-    A run that directly follows a letter, digit or apostrophe is treated as
-    the tail of an already styled word (the "s" in "Dᴏᴡɴʟᴏᴀᴅs") and is left
-    alone, so styling the same text twice is a safe no-op. That matters
-    because handlers style their panels with sc() and the global outgoing
-    patch styles them a second time.
-    """
+    """Small-caps the first letter of every word; a run that directly
+    follows a letter, digit or apostrophe is the tail of an already styled
+    word (the trailing "s" in "Dᴏᴡɴʟᴏᴀᴅs") and is left alone, so styling
+    twice is a safe no-op."""
     out = []
     pos = 0
     for match in _WORD_RE.finditer(text):
@@ -47,7 +48,10 @@ _ENTITY_RE = re.compile('&[a-zA-Z][a-zA-Z0-9]*;')
 _URL_RE = re.compile('(?:https?://|t\\.me/|telegram\\.me/|telegram\\.dog/)[^\\s<]+', re.IGNORECASE)
 _COMMAND_RE = re.compile('(?<![\\w/])/[a-zA-Z_][a-zA-Z0-9_]*(?:@\\w+)?')
 _PLACEHOLDER_RE = re.compile('\\{[a-zA-Z_]+\\}')
-_SKIP_RE = re.compile('|'.join([_CODE_BLOCK_RE.pattern, _HTML_TAG_RE.pattern, _ENTITY_RE.pattern, _URL_RE.pattern, _COMMAND_RE.pattern, _PLACEHOLDER_RE.pattern]), re.DOTALL | re.IGNORECASE)
+_SKIP_RE = re.compile('|'.join([
+    _CODE_BLOCK_RE.pattern, _HTML_TAG_RE.pattern, _ENTITY_RE.pattern,
+    _URL_RE.pattern, _COMMAND_RE.pattern, _PLACEHOLDER_RE.pattern,
+]), re.DOTALL | re.IGNORECASE)
 
 
 def to_small_caps(text: str) -> str:
@@ -66,6 +70,8 @@ def to_small_caps(text: str) -> str:
 
 
 def patch_outgoing_messages():
+    """Guarantee the small-caps look on every outgoing message, even when a
+    handler forgets to call sc() itself."""
     from aiogram import Bot
     from aiogram.types import LinkPreviewOptions, Message, CallbackQuery
     if getattr(patch_outgoing_messages, '_patched', False):
@@ -78,8 +84,6 @@ def patch_outgoing_messages():
             args[text_pos] = to_small_caps(args[text_pos])
         elif text_key in kwargs and isinstance(kwargs[text_key], str):
             kwargs[text_key] = to_small_caps(kwargs[text_key])
-        # Manager-bot messages look cleaner without link previews; callers can
-        # still opt in by passing their own link_preview_options.
         if 'link_preview_options' not in kwargs and 'disable_web_page_preview' not in kwargs:
             kwargs['link_preview_options'] = LinkPreviewOptions(is_disabled=True)
         return (tuple(args), kwargs)
