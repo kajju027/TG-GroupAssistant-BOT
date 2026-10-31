@@ -11,12 +11,11 @@ from aiogram.types import Message
 from bot.database import get_seen_members
 from bot.utils import anim
 from bot.utils.helpers import mention_by_name
-from bot.utils.ui import bold, box, italic, mono, progress_bar, quote, row, sc, sep
+from bot.utils.ui import bold, box, italic, mono, progress_bar, quote, row, sc
 
 router = Router()
 
-_GROUP_TYPES = {'group', 'supergroup'}
-# Telegram hard limit is 4096 characters per message; stay safely below it.
+# Telegram hard limit is 4096 characters per message; stay safely below.
 CHUNK_TEXT_LIMIT = 3200
 CHUNK_DELAY = 0.6
 
@@ -60,12 +59,7 @@ async def _all_targets(message: Message):
 
 
 def _mention_chunks(targets) -> list[str]:
-    """Pack every mention into as few messages as possible.
-
-    All tagged names live together inside one pointing-finger block, e.g.
-        🫵 Name1 • Name2 • Name3 ...
-    instead of one line per member.
-    """
+    """Pack every mention into as few messages as possible."""
     chunks: list[str] = []
     current = '🫵 '
     for uid, name in targets:
@@ -84,20 +78,21 @@ def _mention_chunks(targets) -> list[str]:
 def _header(chat_title: str, count: int, total_members: int, custom_msg: str, progress: tuple[int, int] | None = None) -> str:
     lines = [
         row('Group', bold(escape(chat_title)[:40])),
-        row('Tagging', bold(f'{count}' + (f' / {total_members}' if total_members else '')) + ' members'),
+        row('Tagging', bold(f'{count}' + (f' / {total_members}' if total_members else '')) + f" {sc('members')}"),
     ]
     if progress is not None:
         done, total = progress
         lines.append(row('Progress', mono(progress_bar(done, total))))
-    lines.append(sep())
     if custom_msg:
         lines.append(quote(escape(custom_msg)))
     else:
-        lines.append(f'{italic(sc("Attention everyone!"))}')
+        lines.append(italic(sc('Attention everyone!')))
     return box('Tagging Everyone', lines, icon='📣')
 
 
 async def _tag_everyone(message: Message, custom_msg: str, targets) -> None:
+    from bot.utils import anim as _anim
+
     chat_title = message.chat.title or 'this group'
     total_members = 0
     try:
@@ -107,28 +102,27 @@ async def _tag_everyone(message: Message, custom_msg: str, targets) -> None:
     chunks = _mention_chunks(targets)
     note = ''
     if total_members and len(targets) < total_members:
-        note = f"\n{italic(sc(f'I tag everyone I have seen here ({len(targets)}/{total_members}). New faces join the list once they talk.'))}"
-    header = _header(chat_title, len(targets), total_members, custom_msg, (0, len(chunks)))
-    header_msg = await anim.play_in_chat(message.bot, message.chat.id, header + note, kind='tag', parse_mode='HTML')
+        note = '\n' + italic(sc(f'I tag everyone I have seen here ({len(targets)}/{total_members}). New faces join the list once they talk.'))
+    header_msg = await _anim.play_in_chat(message.bot, message.chat.id, _header(chat_title, len(targets), total_members, custom_msg, (0, len(chunks))) + note, kind='tag')
     sent = 0
     for index, chunk in enumerate(chunks, 1):
         try:
-            await message.bot.send_message(message.chat.id, chunk, parse_mode='HTML')
+            await message.bot.send_message(message.chat.id, chunk)
             sent += 1
         except Exception:
             pass
         if header_msg is not None and len(chunks) > 1:
-            await anim.edit_safe(header_msg, _header(chat_title, len(targets), total_members, custom_msg, (index, len(chunks))) + note, parse_mode='HTML')
+            await _anim.edit_safe(header_msg, _header(chat_title, len(targets), total_members, custom_msg, (index, len(chunks))) + note)
         if index < len(chunks):
             await asyncio.sleep(CHUNK_DELAY)
     done = box('Everyone Tagged', [
-        row('Tagged', bold(str(len(targets))) + ' members'),
+        row('Tagged', bold(str(len(targets))) + f" {sc('members')}"),
         row('Messages', bold(str(sent))),
-        sep(),
+        '',
         quote(sc('Everyone has been notified.')),
     ], icon='📣')
     if header_msg is not None:
-        await anim.edit_safe(header_msg, done, parse_mode='HTML')
+        await _anim.edit_safe(header_msg, done)
 
 
 async def _tag_admins(message: Message, custom_msg: str, targets) -> None:
@@ -137,56 +131,56 @@ async def _tag_admins(message: Message, custom_msg: str, targets) -> None:
     message_line = quote(escape(custom_msg)) if custom_msg else italic(sc('Attention admins!'))
     header = box('Admin Tag', [
         row('Admins', bold(str(len(items)))),
-        sep(),
+        '',
         message_line,
     ], icon='👑')
-    header_msg = await anim.play(message, header, kind='tag', parse_mode='HTML')
+    await anim.play(message, header, kind='tag')
     for chunk in chunks:
         try:
-            await message.bot.send_message(message.chat.id, chunk, parse_mode='HTML')
+            await message.bot.send_message(message.chat.id, chunk)
         except Exception:
             pass
         await asyncio.sleep(CHUNK_DELAY)
 
 
-@router.message(Command('tag'), F.chat.type.in_(_GROUP_TYPES))
+@router.message(Command('tag'), F.chat.type.in_({'group', 'supergroup'}))
 async def cmd_tag(message: Message, is_admin: bool = False):
     if not is_admin:
-        await message.answer('❌ <b>Admins only.</b>')
+        await message.answer(f"❌ <b>{sc('Admins only.')}</b>")
         return
     mode, custom_msg = _split_command(message)
     if mode in {'all', 'everyone'}:
         targets, error = await _all_targets(message)
         if targets is None:
-            await message.answer(f'❌ Failed to fetch members: {escape(error)}')
+            await message.answer(f"❌ {sc('Failed to fetch members')}: {escape(error)}")
             return
         if not targets:
-            await message.answer('No members found to tag.')
+            await message.answer(sc('No members found to tag.'))
             return
         await _tag_everyone(message, custom_msg, targets)
         return
     targets, error = await _admin_targets(message)
     if targets is None:
-        await message.answer(f'❌ Failed to fetch admins: {escape(error)}')
+        await message.answer(f"❌ {sc('Failed to fetch admins')}: {escape(error)}")
         return
     if not targets:
-        await message.answer('No admins found to tag.')
+        await message.answer(sc('No admins found to tag.'))
         return
     await _tag_admins(message, custom_msg, targets)
 
 
-@router.message(Command('everyone', 'all', 'tagall'), F.chat.type.in_(_GROUP_TYPES))
+@router.message(Command('everyone', 'all', 'tagall'), F.chat.type.in_({'group', 'supergroup'}))
 async def cmd_everyone(message: Message, is_admin: bool = False):
     if not is_admin:
-        await message.answer('❌ <b>Admins only.</b>')
+        await message.answer(f"❌ <b>{sc('Admins only.')}</b>")
         return
     parts = (message.text or '').split(maxsplit=1)
     custom_msg = parts[1].strip() if len(parts) > 1 else ''
     targets, error = await _all_targets(message)
     if targets is None:
-        await message.answer(f'❌ Failed to fetch members: {escape(error)}')
+        await message.answer(f"❌ {sc('Failed to fetch members')}: {escape(error)}")
         return
     if not targets:
-        await message.answer('No members found to tag.')
+        await message.answer(sc('No members found to tag.'))
         return
     await _tag_everyone(message, custom_msg, targets)
