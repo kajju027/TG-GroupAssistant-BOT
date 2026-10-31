@@ -21,7 +21,7 @@ from bot import database as group_db
 from bot.core import database as core_db
 from bot.core.config import ANIMATIONS, BOT_TOKEN, LOG_LEVEL, OWNER_ID, STYLIZE_OUTPUT, TG_API_BASE, TG_API_PROXY
 from bot.core.logger import get_logger, quiet_third_party_loggers
-from bot.handlers import antifake, antilink, antiword, antispam, chat_tracker, download, filters, mute, owner, panel, reactions, settings, start, tag, warn, welcome
+from bot.handlers import antifake, antilink, antiword, antispam, channel_guard, chat_tracker, download, filters, mute, owner, panel, reactions, settings, start, tag, warn, welcome
 from bot.middlewares.admin_check import AdminCheckMiddleware
 from bot.middlewares.tracking import GroupTrackingMiddleware
 from bot.utils import style
@@ -121,6 +121,9 @@ def build_dispatcher() -> Dispatcher:
     dispatcher.include_router(filters.router)
     dispatcher.include_router(download.router)
     dispatcher.include_router(reactions.router)
+    # Anti-Tag channel guard goes last: its catch-all channel_post handler
+    # must see every channel message after the command handler above it.
+    dispatcher.include_router(channel_guard.router)
     return dispatcher
 
 
